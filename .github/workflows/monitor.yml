@@ -1,7 +1,8 @@
 name: Monitor public positions
 
 on:
-  # 部署前保持仅手动触发；Secrets 验证完成后再加入五分钟 schedule。
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       test_notification:
