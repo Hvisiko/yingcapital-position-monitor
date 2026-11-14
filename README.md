@@ -48,7 +48,7 @@ yingcapital-monitor --check-api
 
 ## GitHub Actions 零费用部署方案
 
-使用**公开 GitHub 仓库**。GitHub 官方说明：公共仓库使用标准 GitHub-hosted runner 免费且不限量。本项目的工作流位于 `.github/workflows/monitor.yml`，定时表达式为 `*/5 * * * *`，使用官方标准 `ubuntu-slim` 1 vCPU runner，因此不产生 Actions 计算费。
+使用**公开 GitHub 仓库**。GitHub 官方说明：公共仓库使用标准 GitHub-hosted runner 免费且不限量。本项目的工作流位于 `.github/workflows/monitor.yml`，定时表达式为 `2-59/5 * * * *`（每小时第 2、7、12……57 分钟），使用官方标准 `ubuntu-slim` 1 vCPU runner，因此不产生 Actions 计算费。
 
 正式部署后，工作流只支持 `schedule` 和仓库管理员手动触发，不监听 `push`、`pull_request` 或 `pull_request_target`。两个 GitHub 官方 Action 均固定到核实过的完整 commit SHA；程序不安装第三方 Python 依赖。首次推送时会暂时保留为“仅手动触发”，Secrets 测试通过后才启用五分钟计划任务。
 
