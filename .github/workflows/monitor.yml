@@ -1,0 +1,92 @@
+name: Monitor public positions
+
+on:
+  # 部署前保持仅手动触发；Secrets 验证完成后再加入五分钟 schedule。
+  workflow_dispatch:
+    inputs:
+      test_notification:
+        description: "发送一条 Telegram 测试通知"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yingcapital-position-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # 官方 1 vCPU 轻量 runner；适合短 Python API 任务，费用低于 ubuntu-latest。
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore monitor state
+        shell: bash
+        run: |
+          mkdir -p .runtime
+          if git fetch origin monitor-state:refs/remotes/origin/monitor-state; then
+            git show origin/monitor-state:state.json > .runtime/state.json
+          else
+            echo "No state branch yet; the first valid run will create the baseline."
+          fi
+
+      - name: Monitor current positions
+        id: monitor
+        if: ${{ !inputs.test_notification }}
+        continue-on-error: true
+        env:
+          BINANCE_PORTFOLIO_ID: "5075281354358777856"
+          BINANCE_TRADER_NAME: "熬鹰资本"
+          MONITOR_TIMEZONE: "America/New_York"
+          MONITOR_STATE_PATH: ".runtime/state.json"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: "src"
+        run: python -m yingcapital_monitor
+
+      - name: Send test notification
+        id: notification_test
+        if: ${{ inputs.test_notification }}
+        continue-on-error: true
+        env:
+          BINANCE_PORTFOLIO_ID: "5075281354358777856"
+          BINANCE_TRADER_NAME: "熬鹰资本"
+          MONITOR_TIMEZONE: "America/New_York"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONPATH: "src"
+        run: python -m yingcapital_monitor --test-notification
+
+      - name: Persist monitor state
+        if: ${{ always() && hashFiles('.runtime/state.json') != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          publish_dir="$(mktemp -d)"
+          cp .runtime/state.json "$publish_dir/state.json"
+          cd "$publish_dir"
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b monitor-state
+          git add state.json
+          git commit -m "Update monitor state"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin HEAD:monitor-state
+
+      - name: Propagate monitor failure
+        if: ${{ steps.monitor.outcome == 'failure' || steps.notification_test.outcome == 'failure' }}
+        run: exit 1
+

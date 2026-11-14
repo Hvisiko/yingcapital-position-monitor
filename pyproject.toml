@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yingcapital-position-monitor"
+version = "1.0.0"
+description = "Monitor public Binance lead-trader position snapshots and send Telegram alerts."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ying Capital Monitor" }]
+dependencies = []
+
+[project.scripts]
+yingcapital-monitor = "yingcapital_monitor.app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
