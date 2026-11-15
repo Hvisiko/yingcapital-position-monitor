@@ -3,42 +3,28 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import time
-from datetime import datetime, timezone as utc_timezone
+from datetime import datetime, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .binance import BinanceClient, BinanceError, PositionDataUnavailable
+from .binance import BinanceClient, BinanceError, OperationDataUnavailable
 from .config import Settings
-from .diff import compare_positions
-from .models import PositionEvent, parse_positions
+from .models import ACTION_LABELS, TradeEvent, parse_orders
 from .notify import TelegramNotifier
 from .state import PendingNotification, load_state, save_state
 
 
 LOGGER = logging.getLogger("yingcapital_monitor")
+MAX_SEEN_FINGERPRINTS = 2_000
 
 
-def _now(timezone: str) -> str:
+def _now(timezone_name: str) -> str:
     try:
-        selected_timezone = ZoneInfo(timezone)
+        selected_timezone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError:
-        LOGGER.warning("系统缺少时区 %s，检测时间回退为 UTC", timezone)
-        selected_timezone = utc_timezone.utc
+        LOGGER.warning("系统缺少时区 %s，时间回退为 UTC", timezone_name)
+        selected_timezone = timezone.utc
     return datetime.now(selected_timezone).isoformat(timespec="seconds")
-
-
-def _quantity_signature(positions) -> dict[str, str]:
-    return {key: str(value.quantity) for key, value in sorted(positions.items())}
-
-
-def _confirm_positions(client: BinanceClient, first_positions):
-    """用第二次独立读取排除短暂空列表、不完整列表和缓存抖动。"""
-    time.sleep(2)
-    confirmation = client.fetch_snapshot()
-    confirmed = parse_positions(confirmation.position_rows)
-    if _quantity_signature(first_positions) != _quantity_signature(confirmed):
-        raise PositionDataUnavailable("连续两次仓位快照不一致")
-    return confirmed
 
 
 def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]:
@@ -49,11 +35,20 @@ def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]
             try:
                 notifier.send_telegram(item.event)
                 item.delivered["telegram"] = True
+                # 每次成功后立即落盘，尽量缩小成功发送但尚未记账的窗口。
                 save_state(state_path, state)
-                LOGGER.info("Telegram 已发送：%s", event_id)
-            except Exception as error:  # 每个渠道独立重试
+                LOGGER.info(
+                    "Telegram 已发送：action=%s symbol=%s event=%s",
+                    ACTION_LABELS[item.event.action],
+                    item.event.symbol,
+                    event_id[:12],
+                )
+            except Exception as error:
                 errors.append(f"Telegram {event_id}: {type(error).__name__}")
-                LOGGER.error("Telegram 通知失败：%s（详细错误已隐藏）", event_id)
+                LOGGER.error(
+                    "Telegram 通知失败，将在下次运行重试：event=%s（详细错误已隐藏）",
+                    event_id[:12],
+                )
 
     state.pending = [
         item for item in state.pending if not all(item.delivered.values())
@@ -62,122 +57,185 @@ def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]
     return errors
 
 
+def _merge_seen(old: list[str], current: list[str]) -> list[str]:
+    merged: list[str] = []
+    known: set[str] = set()
+    for fingerprint in old + current:
+        if fingerprint not in known:
+            known.add(fingerprint)
+            merged.append(fingerprint)
+    return merged[-MAX_SEEN_FINGERPRINTS:]
+
+
 def run_monitor(settings: Settings) -> int:
     state = load_state(settings.state_path, settings.portfolio_id)
     notifier = TelegramNotifier(settings)
 
-    # 先重试上次未完成的渠道；每个渠道有独立送达标记。
+    # 先重试上一次已发现但未成功发送的真实操作。
     delivery_errors = _deliver_pending(state, settings.state_path, notifier)
 
-    client = BinanceClient(settings.portfolio_id)
     try:
-        snapshot = client.fetch_snapshot()
-    except PositionDataUnavailable as error:
-        LOGGER.warning("仓位数据暂时不可用；保留原基准，不生成事件：%s", error)
-        return 1 if delivery_errors else 0
-    except BinanceError:
-        LOGGER.exception("读取币安当前仓位失败；保留原基准，不生成事件")
+        snapshot = BinanceClient(settings.portfolio_id).fetch_operations()
+    except OperationDataUnavailable as error:
+        LOGGER.error(
+            "币安最新操作记录当前不可用；保留原状态，不生成任何交易提醒：%s",
+            error,
+        )
+        return 1
+    except BinanceError as error:
+        LOGGER.error(
+            "读取币安最新操作记录失败；保留原状态，不生成任何交易提醒：%s",
+            error,
+        )
         return 1
 
     actual_name = str(snapshot.detail.get("nickname", "")).strip()
     if actual_name and actual_name != settings.trader_name:
         LOGGER.error(
-            "项目昵称不匹配：预期=%s，实际=%s", settings.trader_name, actual_name
+            "项目昵称不匹配：预期=%s，实际=%s；不更新状态",
+            settings.trader_name,
+            actual_name,
         )
         return 1
 
+    orders = parse_orders(snapshot.order_rows)
     now = _now(settings.timezone)
-    current = parse_positions(snapshot.position_rows)
+    fingerprints = [order.fingerprint for order in orders]
+    newest_time = max((order.order_time for order in orders), default=None)
+
     if not state.initialized:
-        try:
-            current = _confirm_positions(client, current)
-        except (PositionDataUnavailable, BinanceError) as error:
-            LOGGER.warning("首次基准确认失败；不建立基准、不发送提醒：%s", error)
-            return 1 if delivery_errors else 0
         state.initialized = True
         state.initialized_at = now
         state.updated_at = now
-        state.baseline = current
+        state.last_order_time = newest_time
+        state.seen_order_fingerprints = _merge_seen([], fingerprints)
         save_state(settings.state_path, state)
-        LOGGER.info("首次有效运行：已保存 %d 个当前仓位为基准，不发送提醒", len(current))
+        LOGGER.info(
+            "首次有效运行：已将最新 %d 条公开操作记录保存为基准；"
+            "positionShow=%s；不发送旧交易提醒",
+            len(orders),
+            snapshot.detail.get("positionShow"),
+        )
         return 1 if delivery_errors else 0
 
-    events = compare_positions(state.baseline, current, detected_at=now)
-    if events:
-        try:
-            current = _confirm_positions(client, current)
-        except (PositionDataUnavailable, BinanceError) as error:
-            LOGGER.warning("仓位变化二次确认失败；保留原基准、不发送提醒：%s", error)
-            return 1 if delivery_errors else 0
-        events = compare_positions(state.baseline, current, detected_at=now)
-    state.baseline = current
-    state.updated_at = now
-    known_ids = {item.event.event_id for item in state.pending}
-    for event in events:
-        if event.event_id not in known_ids:
+    seen = set(state.seen_order_fingerprints)
+    new_orders = [order for order in orders if order.fingerprint not in seen]
+    new_orders.sort(key=lambda order: (order.order_time, order.order_update_time))
+
+    if (
+        new_orders
+        and len(snapshot.order_rows) >= 100
+        and not any(fingerprint in seen for fingerprint in fingerprints)
+    ):
+        LOGGER.warning(
+            "最新 100 条记录与旧基准没有交集，期间可能超过接口单页容量；"
+            "仍将当前可见记录逐条处理"
+        )
+
+    existing_pending = {item.event.event_id for item in state.pending}
+    for order in new_orders:
+        event = order.to_event()
+        if event.event_id not in existing_pending:
             state.pending.append(PendingNotification(event=event))
-    # 先持久化新基准与待发事件，避免发送期间崩溃造成事件丢失。
+            existing_pending.add(event.event_id)
+
+    # 先持久化去重指纹和待发事件，再进行网络通知。
+    state.seen_order_fingerprints = _merge_seen(
+        state.seen_order_fingerprints, fingerprints
+    )
+    state.updated_at = now
+    if newest_time is not None:
+        state.last_order_time = max(state.last_order_time or 0, newest_time)
     save_state(settings.state_path, state)
 
-    if not events:
-        LOGGER.info("当前仓位无变化，不发送消息")
+    if not new_orders:
+        LOGGER.info(
+            "最新操作记录无新增：读取=%d，接口总数=%d，positionShow=%s；"
+            "不发送消息",
+            len(orders),
+            snapshot.total,
+            snapshot.detail.get("positionShow"),
+        )
         return 1 if delivery_errors else 0
 
-    LOGGER.info("检测到 %d 个仓位变化", len(events))
+    LOGGER.info(
+        "检测到 %d 条新增真实操作记录，准备发送 Telegram",
+        len(new_orders),
+    )
     new_errors = _deliver_pending(state, settings.state_path, notifier)
     return 1 if delivery_errors or new_errors else 0
 
 
 def check_api(settings: Settings) -> int:
     try:
-        snapshot = BinanceClient(settings.portfolio_id).fetch_snapshot()
-    except PositionDataUnavailable as error:
-        LOGGER.warning("接口可访问，但仓位不可用：%s", error)
+        snapshot = BinanceClient(settings.portfolio_id).fetch_operations()
+    except OperationDataUnavailable as error:
+        LOGGER.error("最新操作记录接口不可用：%s", error)
         return 2
-    except BinanceError:
-        LOGGER.exception("币安接口验证失败")
+    except BinanceError as error:
+        LOGGER.error("币安接口验证失败：%s", error)
         return 1
-    positions = parse_positions(snapshot.position_rows)
+
+    orders = parse_orders(snapshot.order_rows)
     LOGGER.info(
-        "接口验证成功：nickname=%s，公开有效仓位=%d",
+        "最新操作记录接口验证成功：nickname=%s，positionShow=%s，"
+        "接口总数=%d，本页有效成交=%d",
         snapshot.detail.get("nickname"),
-        len(positions),
+        snapshot.detail.get("positionShow"),
+        snapshot.total,
+        len(orders),
     )
+    if orders:
+        latest = max(orders, key=lambda order: order.order_time)
+        LOGGER.info(
+            "接口最新真实记录：action=%s symbol=%s qty=%s orderTime=%d",
+            ACTION_LABELS[latest.action or ""],
+            latest.symbol,
+            latest.executed_qty,
+            latest.order_time,
+        )
+    else:
+        LOGGER.info("接口当前没有公开操作记录；空列表本身是有效结果")
     return 0
 
 
 def send_test(settings: Settings) -> int:
-    from decimal import Decimal
-
-    event = PositionEvent(
-        action="OPEN",
+    now_milliseconds = int(datetime.now(timezone.utc).timestamp() * 1000)
+    event = TradeEvent(
+        order_fingerprint="telegram-connectivity-test",
+        action="OPEN_LONG",
         symbol="TESTUSDT",
-        side="LONG",
-        old_quantity=Decimal("0"),
-        new_quantity=Decimal("1"),
-        entry_price=Decimal("100"),
-        mark_price=Decimal("100"),
-        leverage=Decimal("1"),
-        unrealized_pnl=Decimal("0"),
-        margin_type="CROSS",
-        detected_at=_now(settings.timezone),
+        side="BUY",
+        position_side="LONG",
+        order_type="MARKET",
+        executed_qty=Decimal("1"),
+        avg_price=Decimal("100"),
+        total_pnl=Decimal("0"),
+        order_time=now_milliseconds,
+        order_update_time=now_milliseconds,
     )
-    notifier = TelegramNotifier(settings)
-    failed = False
     try:
-        notifier.send_telegram(event)
-        LOGGER.info("Telegram 测试通知已发送")
+        TelegramNotifier(settings).send_telegram(event)
+        LOGGER.info("Telegram 连通性测试通知已发送")
+        return 0
     except Exception:
-        failed = True
-        LOGGER.error("Telegram 测试通知失败（详细错误已隐藏）")
-    return 1 if failed else 0
+        LOGGER.error("Telegram 连通性测试失败（详细错误已隐藏）")
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="熬鹰资本币安公开仓位监控")
+    parser = argparse.ArgumentParser(description="熬鹰资本币安公开操作记录监控")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--check-api", action="store_true", help="只验证当前仓位接口")
-    group.add_argument("--test-notification", action="store_true", help="发送 Telegram 测试通知")
+    group.add_argument(
+        "--check-api",
+        action="store_true",
+        help="验证网页最新操作记录接口，不发送通知",
+    )
+    group.add_argument(
+        "--test-notification",
+        action="store_true",
+        help="仅发送 Telegram 连通性测试通知",
+    )
     return parser
 
 
@@ -201,4 +259,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

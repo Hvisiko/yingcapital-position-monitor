@@ -7,15 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .models import Position, PositionEvent
+from .models import TradeEvent
 
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 @dataclass
 class PendingNotification:
-    event: PositionEvent
+    event: TradeEvent
     delivered: dict[str, bool] = field(
         default_factory=lambda: {"telegram": False}
     )
@@ -27,10 +27,8 @@ class PendingNotification:
     def from_dict(cls, raw: dict[str, Any]) -> "PendingNotification":
         delivered = raw.get("delivered", {})
         return cls(
-            event=PositionEvent.from_dict(raw["event"]),
-            delivered={
-                "telegram": bool(delivered.get("telegram", False)),
-            },
+            event=TradeEvent.from_dict(raw["event"]),
+            delivered={"telegram": bool(delivered.get("telegram", False))},
         )
 
 
@@ -38,10 +36,11 @@ class PendingNotification:
 class MonitorState:
     portfolio_id: str
     initialized: bool = False
-    baseline: dict[str, Position] = field(default_factory=dict)
+    seen_order_fingerprints: list[str] = field(default_factory=list)
     pending: list[PendingNotification] = field(default_factory=list)
     initialized_at: str | None = None
     updated_at: str | None = None
+    last_order_time: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,27 +49,33 @@ class MonitorState:
             "initialized": self.initialized,
             "initialized_at": self.initialized_at,
             "updated_at": self.updated_at,
-            "baseline": {
-                key: value.to_dict() for key, value in sorted(self.baseline.items())
-            },
+            "last_order_time": self.last_order_time,
+            "seen_order_fingerprints": self.seen_order_fingerprints,
             "pending": [item.to_dict() for item in self.pending],
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], portfolio_id: str) -> "MonitorState":
-        if raw.get("version") != STATE_VERSION:
-            raise ValueError("不支持的状态文件版本")
         if str(raw.get("portfolio_id")) != portfolio_id:
             raise ValueError("状态文件的项目 ID 与当前配置不一致")
+
+        # v1 是旧的“当前仓位”基准，不能用于操作记录去重。迁移时丢弃旧
+        # 仓位和旧待发事件，让下一次有效接口读取建立全新的操作记录基准。
+        if raw.get("version") == 1:
+            return cls(portfolio_id=portfolio_id)
+        if raw.get("version") != STATE_VERSION:
+            raise ValueError("不支持的状态文件版本")
+
+        fingerprints = raw.get("seen_order_fingerprints", [])
+        if not isinstance(fingerprints, list):
+            raise ValueError("状态文件的操作指纹列表无效")
         return cls(
             portfolio_id=portfolio_id,
             initialized=bool(raw.get("initialized", False)),
             initialized_at=raw.get("initialized_at"),
             updated_at=raw.get("updated_at"),
-            baseline={
-                key: Position.from_dict(value)
-                for key, value in raw.get("baseline", {}).items()
-            },
+            last_order_time=raw.get("last_order_time"),
+            seen_order_fingerprints=[str(item) for item in fingerprints],
             pending=[
                 PendingNotification.from_dict(item)
                 for item in raw.get("pending", [])
@@ -83,6 +88,8 @@ def load_state(path: Path, portfolio_id: str) -> MonitorState:
         return MonitorState(portfolio_id=portfolio_id)
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
+    if not isinstance(raw, dict):
+        raise ValueError("状态文件格式无效")
     return MonitorState.from_dict(raw, portfolio_id)
 
 
@@ -101,4 +108,3 @@ def save_state(path: Path, state: MonitorState) -> None:
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
-

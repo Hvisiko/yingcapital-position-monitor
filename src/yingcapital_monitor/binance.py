@@ -10,20 +10,23 @@ from typing import Any
 
 
 BASE_URL = "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade"
+MILLISECONDS_PER_DAY = 86_400_000
 
 
 class BinanceError(RuntimeError):
     pass
 
 
-class PositionDataUnavailable(BinanceError):
-    """接口成功，但币安没有公开有效仓位数据。"""
+class OperationDataUnavailable(BinanceError):
+    """接口无法提供可验证的公开操作记录。"""
 
 
 @dataclass(frozen=True)
-class BinanceSnapshot:
+class BinanceOperationsSnapshot:
     detail: dict[str, Any]
-    position_rows: list[dict[str, Any]]
+    order_rows: list[dict[str, Any]]
+    total: int
+    index_value: str | None
 
 
 class BinanceClient:
@@ -40,7 +43,8 @@ class BinanceClient:
         self.headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "User-Agent": "Mozilla/5.0 YingCapitalPositionMonitor/1.0",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 YingCapitalOperationMonitor/2.0",
             "clienttype": "web",
             "Origin": "https://www.binance.com",
             "Referer": (
@@ -49,22 +53,42 @@ class BinanceClient:
             ),
         }
 
-    def _get(self, path: str) -> Any:
-        query = urllib.parse.urlencode({"portfolioId": self.portfolio_id})
-        url = f"{BASE_URL}/{path}?{query}"
-        request = urllib.request.Request(url=url, headers=self.headers, method="GET")
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        url = f"{BASE_URL}/{path}"
+        data: bytes | None = None
+        if method == "GET":
+            query = urllib.parse.urlencode({"portfolioId": self.portfolio_id})
+            url = f"{url}?{query}"
+        elif payload is not None:
+            data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
         last_error: Exception | None = None
         for attempt in range(1, self.max_attempts + 1):
+            request = urllib.request.Request(
+                url=url,
+                data=data,
+                headers=self.headers,
+                method=method,
+            )
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-                if payload.get("success") is not True or payload.get("code") != "000000":
+                    result = json.loads(response.read().decode("utf-8"))
+                if (
+                    not isinstance(result, dict)
+                    or result.get("success") is not True
+                    or result.get("code") != "000000"
+                ):
                     raise BinanceError(
-                        f"币安接口返回失败：code={payload.get('code')} "
-                        f"message={payload.get('message')}"
+                        "币安接口返回失败："
+                        f"code={getattr(result, 'get', lambda *_: None)('code')} "
+                        f"message={getattr(result, 'get', lambda *_: None)('message')}"
                     )
-                return payload.get("data")
+                return result.get("data")
             except urllib.error.HTTPError as error:
                 last_error = error
                 if error.code not in {429, 500, 502, 503, 504}:
@@ -77,29 +101,52 @@ class BinanceClient:
 
         raise BinanceError(f"币安接口请求失败：{last_error}") from last_error
 
-    def fetch_snapshot(self) -> BinanceSnapshot:
-        detail = self._get("lead-portfolio/detail")
+    def fetch_operations(
+        self,
+        *,
+        lookback_days: int = 7,
+        page_size: int = 100,
+    ) -> BinanceOperationsSnapshot:
+        detail = self._request("GET", "lead-portfolio/detail")
         if not isinstance(detail, dict):
             raise BinanceError("币安项目详情格式无效")
         if str(detail.get("leadPortfolioId")) != self.portfolio_id:
             raise BinanceError("币安返回了不匹配的项目 ID")
 
-        position_data = self._get("lead-data/positions")
-        visibility = detail.get("positionShow")
-        if visibility is not True:
-            raise PositionDataUnavailable(
-                f"当前仓位未公开（positionShow={visibility}）"
+        end_time = int(time.time() * 1000)
+        history = self._request(
+            "POST",
+            "lead-portfolio/order-history",
+            {
+                "portfolioId": self.portfolio_id,
+                "startTime": end_time - lookback_days * MILLISECONDS_PER_DAY,
+                "endTime": end_time,
+                "pageNumber": 1,
+                "pageSize": page_size,
+            },
+        )
+        if not isinstance(history, dict):
+            raise OperationDataUnavailable(
+                "最新操作记录 data 为空或格式无效，不能确认交易状态"
             )
-        if position_data is None:
-            raise PositionDataUnavailable(
-                f"当前仓位未公开（positionShow={visibility}，positions data=null）"
-            )
-        if not isinstance(position_data, list):
-            raise PositionDataUnavailable(
-                f"当前仓位数据格式无效：{type(position_data).__name__}"
-            )
-        if not all(isinstance(row, dict) for row in position_data):
-            raise PositionDataUnavailable("当前仓位列表包含无效记录")
 
-        return BinanceSnapshot(detail=detail, position_rows=position_data)
+        rows = history.get("list")
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise OperationDataUnavailable(
+                "最新操作记录 list 为空或格式无效，不能确认交易状态"
+            )
 
+        try:
+            total = int(history.get("total", len(rows)))
+        except (TypeError, ValueError):
+            total = len(rows)
+        return BinanceOperationsSnapshot(
+            detail=detail,
+            order_rows=rows,
+            total=total,
+            index_value=(
+                str(history["indexValue"])
+                if history.get("indexValue") is not None
+                else None
+            ),
+        )

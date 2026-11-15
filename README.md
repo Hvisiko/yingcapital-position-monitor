@@ -1,91 +1,69 @@
-# 熬鹰资本币安公开仓位监控
+# 熬鹰资本币安公开操作记录监控
 
-这是一个只读监控项目。它每 5 分钟读取币安交易员“熬鹰资本”（项目 ID `5075281354358777856`）的**当前公开仓位快照**，比较上一次有效快照，并通过 Telegram 提醒以下变化：
+这是一个只读监控项目。它每 5 分钟读取币安交易员“熬鹰资本”（项目 ID 5075281354358777856）网页中的**最新操作记录**，在启动后发现以下新成交时发送 Telegram：
 
-- 新开仓
-- 加仓
-- 减仓
-- 平仓
-- 反手（同一交易对从单一多头切换为单一空头，或相反）
+- BUY + LONG：开多
+- SELL + SHORT：开空
+- SELL + LONG：平多
+- BUY + SHORT：平空
 
-程序没有任何下单、撤单、账户或资金接口，也不需要币安 API Key。
+程序没有下单、撤单、账户或资金接口，不需要币安 API Key，不调用 OpenAI API、ChatGPT、Codex 或任何其他 AI/付费模型。
 
-部署后的定时任务也**不会调用 OpenAI API、ChatGPT、Codex 或任何付费 AI 模型**。项目没有 AI SDK、AI 密钥或相关网络请求；每次运行只是普通 Python 程序调用币安公开只读接口，并在有变化时调用 Telegram Bot API。
+## 数据源与行为保证
 
-## 行为保证
+使用币安网页自身调用的公开只读接口：
 
-1. 不调用订单历史或已平仓历史接口，不下载、分析或通知旧交易。
-2. 首次取得**有效**仓位列表时只保存基准，不发送提醒。
-3. `positionShow` 不是 `true`、`data=null`、超时、HTTP 错误或数据格式异常均视为“数据不可用”，保留原基准，绝不当作空仓，因此不会误报平仓。
-4. 只有 `positionShow=true` 且币安明确返回有效列表时才比较；在此前提下，明确的空列表 `[]` 才代表有效空仓。
-5. 没有数量变化时不发送消息；价格和浮盈变化本身不触发提醒。
-6. Telegram 临时发送失败时会保留待发事件，下次运行只重试未送达事件。
-7. 状态保存在仓库的独立 `monitor-state` 分支，主分支不会被定时状态提交污染；状态只含币安公开仓位数据和通知渠道送达布尔值。
-8. 首次建基准及检测到任何变化时都会二次读取；两次数量快照不一致或第二次不可用时，保留旧基准且不通知。
+    POST /bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history
 
-## 当前接口验证结果
+1. 第一次成功读取时，把当时可见的最新操作记录全部保存为基准，不通知旧交易。
+2. 后续只通知指纹未见过的新操作；没有新记录不发送消息。
+3. 去重状态和待发 Telegram 事件保存在独立的 monitor-state 分支。
+4. 新事件先写入持久化状态再发送；Telegram 临时失败时，下次运行重试。
+5. 接口超时、HTTP 错误、data=null 或数据格式异常时，工作流失败并保留原状态，不把不可用误判成交易。
+6. 操作记录接口与当前仓位公开状态彼此独立。即使 positionShow=false，只要操作记录接口仍返回有效 list，监控就正常处理；程序不读取当前仓位接口。
+7. 每次最多读取最近 7 天的最新 100 条记录。正常五分钟轮询时足以覆盖新操作；若五分钟内超过 100 条，会在日志明确警告可能存在接口分页间隙。
 
-项目详情接口可访问，返回昵称“熬鹰资本”、状态 `ACTIVE`。但在验证时：
+## 已验证的真实接口结果
 
-```text
-positionShow=false
-positions data=null
-```
+2026-11-14 实测项目详情仍为 positionShow=false，但最新操作记录接口成功返回 code=000000 和真实成交列表。接口中的一条记录为：
 
-这表示该交易员当时没有向公众开放当前仓位。系统可以部署并定时检查，但在币安返回有效仓位列表之前不会建立基准，也不会产生仓位提醒。该安全行为是有意设计。
+    BTCUSDT / BUY / LONG / MARKET
+    executedQty=9.079
+    avgPrice=63837.88902
+    orderTime=1794698499143
+
+程序将其识别为“开多”。这正是网页约下午 6:21 显示的操作，证明此前漏报原因是旧程序只监控当前仓位，而不是操作记录。迁移后的首次运行会把它作为旧记录建立基准，不补发提醒；其后新增的操作才会通知。
+
+--check-api 会读取并打印接口最新真实记录的动作、合约、数量和时间戳，不发送模拟消息：
+
+    PYTHONPATH=src python -m yingcapital_monitor --check-api
 
 ## 本地测试
 
 项目只使用 Python 标准库：
 
-```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-yingcapital-monitor --check-api
-```
+    python -m unittest discover -s tests -v
 
-`--check-api` 不需要通知密钥。接口可访问但仓位未公开时退出码为 `2`。
+测试覆盖四种操作映射、真实接口字段样本、首次基准不通知、新记录仅通知一次、状态迁移以及接口不可用时保留状态。
 
-## GitHub Actions 零费用部署方案
+## GitHub Actions 部署
 
-使用**公开 GitHub 仓库**。GitHub 官方说明：公共仓库使用标准 GitHub-hosted runner 免费且不限量。本项目的工作流位于 `.github/workflows/monitor.yml`，定时表达式为 `2-59/5 * * * *`（每小时第 2、7、12……57 分钟），使用官方标准 `ubuntu-slim` 1 vCPU runner，因此不产生 Actions 计算费。
+工作流位于 .github/workflows/monitor.yml，cron 为 2-59/5 * * * *，即每小时第 2、7、12……57 分钟计划执行。它使用公共仓库的标准 ubuntu-slim GitHub-hosted runner；按 GitHub 对公共仓库标准 runner 的规则，Actions 计算用量免费。工作流不安装第三方 Python 包。
 
-正式部署后，工作流只支持 `schedule` 和仓库管理员手动触发，不监听 `push`、`pull_request` 或 `pull_request_target`。两个 GitHub 官方 Action 均固定到核实过的完整 commit SHA；程序不安装第三方 Python 依赖。首次推送时会暂时保留为“仅手动触发”，Secrets 测试通过后才启用五分钟计划任务。
-
-在私有仓库的 **Settings → Secrets and variables → Actions** 中建立这些 Repository secrets：
+只需要两个 Repository Secrets：
 
 | Secret | 说明 |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | 从 BotFather 获取的机器人 Token |
-| `TELEGRAM_CHAT_ID` | Telegram 接收方 Chat ID |
+| TELEGRAM_BOT_TOKEN | Telegram Bot Token |
+| TELEGRAM_CHAT_ID | Telegram 接收方 Chat ID |
 
-Telegram Bot Token 和 Chat ID 只从 GitHub Secrets 注入，不会进入代码、状态文件或提交历史。GitHub 官方说明 fork 发起的工作流不会取得这些 Secrets，并会自动遮蔽日志中意外打印的 Secret 原值。
+密钥只由 GitHub Secrets 注入，不进入代码、状态、日志或提交历史。工作流仅有定时触发和仓库管理员手动触发，不响应外部 PR。
 
-配置后先在 **Actions → Monitor public positions → Run workflow** 勾选 `test_notification`，验证 Telegram。正常定时任务首次取得有效仓位时只建立基准。Telegram 私聊机器人通常还需要先在客户端向机器人点击 **Start**。
+## 运行边界与风险
 
-## 监控边界
+- 此接口是币安网页公开 BAPI，并非承诺长期兼容的正式开发者 API；币安若改接口，工作流会明确失败，不会假装监控正常。
+- GitHub cron 的五分钟是计划频率，不是实时 SLA。平台高负载时可能延迟或漏调度；下一次成功运行仍会从最近记录中补抓尚未见过的交易。
+- 公共仓库的源码、工作流、日志和 monitor-state 分支公开。状态只包含公开交易指纹和必要的待发公开交易内容，不保存 Telegram Token、Chat ID 或私人数据。
+- GitHub 可能暂停长期无仓库活动的定时工作流，应定期检查 Actions 页面。
 
-此版本严格按快照比较，不读取成交记录。因此，如果某个仓位在两次五分钟检查之间开仓后又完全平仓、且最终快照与之前相同，系统无法观察到这个瞬时过程。这是“不读取历史交易”与五分钟快照方案的固有限制。
-
-## 安全
-
-- 不把真实密钥写入 `.env`、代码、状态文件或仓库。
-- 不记录 Bot Token、Chat ID 或完整请求头。
-- 仓位状态只包含币安公开数据。
-- 代码中不存在真实交易功能。
-- 代码中不存在 OpenAI、ChatGPT、Codex 或其他 AI 模型调用。
-
-## 可能的服务费用
-
-- 本方案使用公开仓库的标准 `ubuntu-slim` runner；按 GitHub 当前规则，其 Actions 计算用量免费且不限量。
-- Telegram Bot API 通常不收费。
-
-本项目不会自动开通、购买或启用任何收费服务。
-
-## 公共仓库风险
-
-- 源码、工作流、Actions 日志和 `monitor-state` 分支对所有人可见；状态分支只保存本来就公开的币安仓位快照，不保存用户凭据或收件信息。
-- 不要向仓库添加不受信任的写权限协作者；有写权限的人可以修改默认分支上的工作流并使用仓库 Secrets。
-- GitHub 定时任务可能因平台高负载而延迟，极端情况下可能丢弃排队任务；五分钟是 GitHub 支持的最短间隔，并非实时保证。
-- 公共仓库连续 60 天无仓库活动时，GitHub 可能自动停用定时工作流，需要手动重新启用。状态分支通常会持续产生仓库活动，但仍建议定期检查 Actions 状态。
-
+本项目不会自动开通、购买或启用收费服务，也不会进行任何真实交易。

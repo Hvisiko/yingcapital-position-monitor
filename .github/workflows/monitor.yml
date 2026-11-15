@@ -1,4 +1,4 @@
-name: Monitor public positions
+name: Monitor public operation records
 
 on:
   schedule:
@@ -43,7 +43,7 @@ jobs:
             echo "No state branch yet; the first valid run will create the baseline."
           fi
 
-      - name: Monitor current positions
+      - name: Monitor latest operation records
         id: monitor
         if: ${{ !inputs.test_notification }}
         continue-on-error: true

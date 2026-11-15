@@ -3,44 +3,39 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from .config import Settings
-from .models import PositionEvent, decimal_text
+from .models import ACTION_LABELS, TradeEvent, decimal_text
 
 
-ACTION_LABELS = {
-    "OPEN": "新开仓",
-    "ADD": "加仓",
-    "REDUCE": "减仓",
-    "CLOSE": "平仓",
-    "REVERSE": "反手",
-}
+def _format_order_time(milliseconds: int, timezone_name: str) -> str:
+    try:
+        selected_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        selected_timezone = timezone.utc
+    value = datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
+    return value.astimezone(selected_timezone).isoformat(timespec="seconds")
 
 
-def render_event(event: PositionEvent, settings: Settings) -> str:
-    label = ACTION_LABELS[event.action]
-    direction = (
-        f"{event.from_side} → {event.side}"
-        if event.action == "REVERSE"
-        else event.side
+def render_event(event: TradeEvent, settings: Settings) -> str:
+    action = ACTION_LABELS[event.action]
+    direction = "多" if event.position_side == "LONG" else "空"
+    return "\n".join(
+        [
+            f"【{settings.trader_name}】{action}提醒",
+            f"合约：{event.symbol}",
+            f"方向：{direction}",
+            f"成交数量：{decimal_text(event.executed_qty)}",
+            f"成交均价：{decimal_text(event.avg_price)}",
+            f"订单类型：{event.order_type}",
+            f"已实现盈亏：{decimal_text(event.total_pnl)}",
+            f"操作时间：{_format_order_time(event.order_time, settings.timezone)}",
+            f"项目 ID：{settings.portfolio_id}",
+            "数据源：币安网页公开最新操作记录（只读）",
+        ]
     )
-    lines = [
-        f"【{settings.trader_name}】{label}提醒",
-        f"合约：{event.symbol}",
-        f"方向：{direction}",
-        (
-            "仓位数量："
-            f"{decimal_text(event.old_quantity)} → {decimal_text(event.new_quantity)}"
-        ),
-        f"开仓均价：{decimal_text(event.entry_price)}",
-        f"标记价格：{decimal_text(event.mark_price)}",
-        f"杠杆：{decimal_text(event.leverage)}x",
-        f"保证金模式：{event.margin_type}",
-        f"未实现盈亏：{decimal_text(event.unrealized_pnl)} USDT",
-        f"检测时间：{event.detected_at}",
-        f"项目 ID：{settings.portfolio_id}",
-        "数据源：币安公开当前仓位（只读）",
-    ]
-    return "\n".join(lines)
 
 
 class TelegramNotifier:
@@ -48,8 +43,7 @@ class TelegramNotifier:
         self.settings = settings
         self.timeout = timeout
 
-    def send_telegram(self, event: PositionEvent) -> None:
-        body = render_event(event, self.settings)
+    def send_telegram(self, event: TradeEvent) -> None:
         url = (
             "https://api.telegram.org/bot"
             f"{self.settings.telegram_bot_token}/sendMessage"
@@ -57,13 +51,15 @@ class TelegramNotifier:
         encoded = urllib.parse.urlencode(
             {
                 "chat_id": self.settings.telegram_chat_id,
-                "text": body,
+                "text": render_event(event, self.settings),
                 "disable_web_page_preview": "true",
             }
         ).encode("utf-8")
         request = urllib.request.Request(url=url, data=encoded, method="POST")
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
-        if result.get("ok") is not True:
-            raise RuntimeError(f"Telegram 发送失败：{result.get('description')}")
-
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            description = (
+                result.get("description") if isinstance(result, dict) else "响应无效"
+            )
+            raise RuntimeError(f"Telegram 发送失败：{description}")
