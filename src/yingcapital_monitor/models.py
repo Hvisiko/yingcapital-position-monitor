@@ -60,6 +60,11 @@ class OrderRecord:
     order_update_time: int
 
     @property
+    def operation_time(self) -> int:
+        """网页“最新操作记录”的成交时间，缺失时才回退到下单时间。"""
+        return self.order_update_time if self.order_update_time > 0 else self.order_time
+
+    @property
     def action(self) -> str | None:
         return ACTION_BY_SIDE.get((self.side, self.position_side))
 
@@ -118,6 +123,11 @@ class TradeEvent:
     total_pnl: Decimal
     order_time: int
     order_update_time: int
+
+    @property
+    def operation_time(self) -> int:
+        """网页“最新操作记录”的成交时间，缺失时才回退到下单时间。"""
+        return self.order_update_time if self.order_update_time > 0 else self.order_time
 
     @property
     def event_id(self) -> str:

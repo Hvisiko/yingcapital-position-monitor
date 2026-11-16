@@ -19,6 +19,20 @@ LIVE_OPEN_LONG = {
     "orderTime": 1794698499143,
 }
 
+SKY_CL_OPEN_LONG = {
+    "symbol": "CLUSDT",
+    "baseAsset": "CL",
+    "quoteAsset": "USDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "positionSide": "LONG",
+    "executedQty": 24.64,
+    "avgPrice": 86.1,
+    "totalPnl": 0.0,
+    "orderUpdateTime": 1794838614665,
+    "orderTime": 1794692560039,
+}
+
 
 class OrderModelTests(unittest.TestCase):
     def test_live_1821_record_is_open_long(self) -> None:
@@ -49,6 +63,23 @@ class OrderModelTests(unittest.TestCase):
         first = parse_orders([LIVE_OPEN_LONG])[0]
         changed = parse_orders([{**LIVE_OPEN_LONG, "totalPnl": 123.45}])[0]
         self.assertEqual(first.fingerprint, changed.fingerprint)
+
+    def test_operation_time_uses_same_row_update_time(self) -> None:
+        order = parse_orders([SKY_CL_OPEN_LONG])[0]
+        self.assertEqual(order.order_time, 1794692560039)
+        self.assertEqual(order.order_update_time, 1794838614665)
+        self.assertEqual(order.operation_time, 1794838614665)
+        # 指纹必须继续匹配 monitor-state 中已经通知过的同一笔交易。
+        self.assertEqual(
+            order.fingerprint,
+            "92e619002adb22e90f1c6f97e70324b48db7edeb0a70d28344c3a431aefc9305",
+        )
+
+    def test_operation_time_falls_back_when_update_time_is_missing(self) -> None:
+        order = parse_orders(
+            [{**SKY_CL_OPEN_LONG, "orderUpdateTime": None}]
+        )[0]
+        self.assertEqual(order.operation_time, 1794692560039)
 
     def test_non_trade_rows_are_ignored(self) -> None:
         self.assertEqual(

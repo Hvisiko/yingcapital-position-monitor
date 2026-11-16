@@ -109,7 +109,7 @@ def run_monitor(settings: Settings) -> int:
     fingerprints = [order.fingerprint for order in orders]
     latest_order = max(
         orders,
-        key=lambda order: (order.order_time, order.order_update_time),
+        key=lambda order: (order.operation_time, order.order_time),
         default=None,
     )
 
@@ -117,7 +117,7 @@ def run_monitor(settings: Settings) -> int:
         state.initialized = True
         state.initialized_at = now
         state.updated_at = now
-        state.last_order_time = latest_order.order_time if latest_order else None
+        state.last_order_time = latest_order.operation_time if latest_order else None
         state.latest_order_fingerprint = (
             latest_order.fingerprint if latest_order else None
         )
@@ -135,7 +135,7 @@ def run_monitor(settings: Settings) -> int:
 
     seen = set(state.seen_order_fingerprints)
     new_orders = [order for order in orders if order.fingerprint not in seen]
-    new_orders.sort(key=lambda order: (order.order_time, order.order_update_time))
+    new_orders.sort(key=lambda order: (order.operation_time, order.order_time))
 
     if (
         new_orders
@@ -162,8 +162,8 @@ def run_monitor(settings: Settings) -> int:
     state.api_index_value = snapshot.index_value
     if latest_order is not None:
         previous_latest_time = state.last_order_time or 0
-        if latest_order.order_time >= previous_latest_time:
-            state.last_order_time = latest_order.order_time
+        if latest_order.operation_time >= previous_latest_time:
+            state.last_order_time = latest_order.operation_time
             state.latest_order_fingerprint = latest_order.fingerprint
     save_state(settings.state_path, state)
 
@@ -224,16 +224,18 @@ def check_api(settings: Settings) -> int:
         len(orders),
     )
     if orders:
-        latest = max(orders, key=lambda order: order.order_time)
+        latest = max(orders, key=lambda order: order.operation_time)
         LOGGER.info(
             "[%s] 最新真实记录：action=%s symbol=%s qty=%s price=%s "
-            "orderTime=%d",
+            "operationTime=%d orderTime=%d orderUpdateTime=%d",
             settings.trader_name,
             ACTION_LABELS[latest.action or ""],
             latest.symbol,
             latest.executed_qty,
             latest.avg_price,
+            latest.operation_time,
             latest.order_time,
+            latest.order_update_time,
         )
     else:
         LOGGER.info("[%s] 当前没有公开操作记录；空列表是有效结果", settings.trader_name)

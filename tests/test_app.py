@@ -200,7 +200,11 @@ class MonitorTests(unittest.TestCase):
                         "executedQty": index,
                         "avgPrice": float(old["avgPrice"]) + index,
                         "orderTime": int(old["orderTime"]) + 600_000,
-                        "orderUpdateTime": int(old["orderTime"]) + 600_000,
+                        "orderUpdateTime": max(
+                            int(old["orderTime"]),
+                            int(old["orderUpdateTime"]),
+                        )
+                        + 600_000,
                     }
                     changed[item.portfolio_id] = snapshot(
                         item.portfolio_id,

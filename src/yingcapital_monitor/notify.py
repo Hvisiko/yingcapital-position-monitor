@@ -35,7 +35,7 @@ def render_event(event: TradeEvent, settings: Settings) -> str:
             f"成交价值：{decimal_text(notional_value)} {quote_asset}",
             f"订单类型：{event.order_type}",
             f"已实现盈亏：{decimal_text(event.total_pnl)} {quote_asset}",
-            f"操作时间：{_format_order_time(event.order_time, settings.timezone)}",
+            f"操作时间：{_format_order_time(event.operation_time, settings.timezone)}",
             f"项目 ID：{settings.portfolio_id}",
             "数据源：币安网页公开最新操作记录（只读）",
         ]
