@@ -8,9 +8,14 @@ from pathlib import Path
 DEFAULT_TRADERS = (
     ("5075281354358777856", "熬鹰资本"),
     ("5296057151807357697", "请填写昵称"),
-    ("5247756265911980544", "万箭穿心BTC"),
+    ("5247756265911980544", "刀箭穿心BTC"),
     ("4532994172262753536", "Sky株式会社"),
+    ("5271501457743196416", "发烧好了呢"),
 )
+
+API_NICKNAME_OVERRIDES = {
+    "5247756265911980544": "万箭穿心BTC",
+}
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,7 @@ class Settings:
     state_path: Path
     telegram_bot_token: str
     telegram_chat_id: str
+    expected_api_nickname: str | None = None
 
     @classmethod
     def all_from_env(
@@ -39,6 +45,10 @@ class Settings:
             trader_name = os.getenv(
                 f"BINANCE_TRADER_{index}_NAME", default_name
             ).strip()
+            expected_api_nickname = os.getenv(
+                f"BINANCE_TRADER_{index}_API_NICKNAME",
+                API_NICKNAME_OVERRIDES.get(portfolio_id, trader_name),
+            ).strip()
             item = cls(
                 portfolio_id=portfolio_id,
                 trader_name=trader_name,
@@ -46,13 +56,14 @@ class Settings:
                 state_path=state_dir / f"{portfolio_id}.json",
                 telegram_bot_token=telegram_bot_token,
                 telegram_chat_id=telegram_chat_id,
+                expected_api_nickname=expected_api_nickname,
             )
             item.validate(require_notifications=require_notifications)
             settings.append(item)
 
         portfolio_ids = [item.portfolio_id for item in settings]
         if len(portfolio_ids) != len(set(portfolio_ids)):
-            raise ValueError("四个交易员的项目 ID 不能重复")
+            raise ValueError("五个交易员的项目 ID 不能重复")
         return tuple(settings)
 
     def validate(self, *, require_notifications: bool) -> None:
@@ -60,6 +71,8 @@ class Settings:
             raise ValueError("币安项目 ID 必须是数字")
         if not self.trader_name:
             raise ValueError("交易员名称不能为空")
+        if not self.expected_api_nickname:
+            raise ValueError("币安接口昵称不能为空")
         if not require_notifications:
             return
 

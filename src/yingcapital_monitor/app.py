@@ -96,10 +96,12 @@ def run_monitor(settings: Settings) -> int:
         return 1
 
     actual_name = str(snapshot.detail.get("nickname", "")).strip()
-    if actual_name and actual_name != settings.trader_name:
+    expected_name = settings.expected_api_nickname or settings.trader_name
+    if actual_name and actual_name != expected_name:
         LOGGER.error(
-            "[%s] 项目昵称不匹配：实际=%s；不更新该交易员状态",
+            "[%s] 项目昵称不匹配：预期=%s，实际=%s；不更新该交易员状态",
             settings.trader_name,
+            expected_name,
             actual_name,
         )
         return 1
@@ -272,12 +274,12 @@ def send_test(settings: Settings) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="币安四交易员公开操作记录监控")
+    parser = argparse.ArgumentParser(description="币安五交易员公开操作记录监控")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--check-api",
         action="store_true",
-        help="验证四个最新操作记录接口，不发送通知",
+        help="验证五个最新操作记录接口，不发送通知",
     )
     group.add_argument(
         "--test-notification",
