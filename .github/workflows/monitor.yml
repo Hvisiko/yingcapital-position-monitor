@@ -21,7 +21,6 @@ concurrency:
 
 jobs:
   monitor:
-    # 官方 1 vCPU 轻量 runner；适合短 Python API 任务，费用低于 ubuntu-latest。
     runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
@@ -38,9 +37,16 @@ jobs:
         run: |
           mkdir -p .runtime
           if git fetch origin monitor-state:refs/remotes/origin/monitor-state; then
-            git show origin/monitor-state:state.json > .runtime/state.json
+            for portfolio_id in 5075281354358777856 5296057151807357697 5247756265911980544 4532994172262753536; do
+              if git cat-file -e "origin/monitor-state:${portfolio_id}.json" 2>/dev/null; then
+                git show "origin/monitor-state:${portfolio_id}.json" > ".runtime/${portfolio_id}.json"
+              elif [ "${portfolio_id}" = "5075281354358777856" ] && git cat-file -e origin/monitor-state:state.json 2>/dev/null; then
+                # 兼容升级前的熬鹰资本单文件状态，绝不重置原基准。
+                git show origin/monitor-state:state.json > ".runtime/${portfolio_id}.json"
+              fi
+            done
           else
-            echo "No state branch yet; the first valid run will create the baseline."
+            echo "No state branch yet; each trader will create an independent baseline."
           fi
 
       - name: Monitor latest operation records
@@ -48,10 +54,16 @@ jobs:
         if: ${{ !inputs.test_notification }}
         continue-on-error: true
         env:
-          BINANCE_PORTFOLIO_ID: "5075281354358777856"
-          BINANCE_TRADER_NAME: "熬鹰资本"
+          BINANCE_TRADER_1_PORTFOLIO_ID: "5075281354358777856"
+          BINANCE_TRADER_1_NAME: "熬鹰资本"
+          BINANCE_TRADER_2_PORTFOLIO_ID: "5296057151807357697"
+          BINANCE_TRADER_2_NAME: "请填写昵称"
+          BINANCE_TRADER_3_PORTFOLIO_ID: "5247756265911980544"
+          BINANCE_TRADER_3_NAME: "万箭穿心BTC"
+          BINANCE_TRADER_4_PORTFOLIO_ID: "4532994172262753536"
+          BINANCE_TRADER_4_NAME: "Sky株式会社"
           MONITOR_TIMEZONE: "America/New_York"
-          MONITOR_STATE_PATH: ".runtime/state.json"
+          MONITOR_STATE_DIR: ".runtime"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONPATH: "src"
@@ -62,28 +74,25 @@ jobs:
         if: ${{ inputs.test_notification }}
         continue-on-error: true
         env:
-          BINANCE_PORTFOLIO_ID: "5075281354358777856"
-          BINANCE_TRADER_NAME: "熬鹰资本"
-          MONITOR_TIMEZONE: "America/New_York"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONPATH: "src"
         run: python -m yingcapital_monitor --test-notification
 
       - name: Persist monitor state
-        if: ${{ always() && hashFiles('.runtime/state.json') != '' }}
+        if: ${{ always() && hashFiles('.runtime/*.json') != '' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           publish_dir="$(mktemp -d)"
-          cp .runtime/state.json "$publish_dir/state.json"
+          cp .runtime/*.json "$publish_dir/"
           cd "$publish_dir"
           git init
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b monitor-state
-          git add state.json
+          git add *.json
           git commit -m "Update monitor state"
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin HEAD:monitor-state
@@ -91,4 +100,3 @@ jobs:
       - name: Propagate monitor failure
         if: ${{ steps.monitor.outcome == 'failure' || steps.notification_test.outcome == 'failure' }}
         run: exit 1
-

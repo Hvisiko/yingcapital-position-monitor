@@ -10,7 +10,7 @@ from typing import Any
 from .models import TradeEvent
 
 
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 
 @dataclass
@@ -41,6 +41,8 @@ class MonitorState:
     initialized_at: str | None = None
     updated_at: str | None = None
     last_order_time: int | None = None
+    latest_order_fingerprint: str | None = None
+    api_index_value: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +52,8 @@ class MonitorState:
             "initialized_at": self.initialized_at,
             "updated_at": self.updated_at,
             "last_order_time": self.last_order_time,
+            "latest_order_fingerprint": self.latest_order_fingerprint,
+            "api_index_value": self.api_index_value,
             "seen_order_fingerprints": self.seen_order_fingerprints,
             "pending": [item.to_dict() for item in self.pending],
         }
@@ -61,9 +65,10 @@ class MonitorState:
 
         # v1 是旧的“当前仓位”基准，不能用于操作记录去重。迁移时丢弃旧
         # 仓位和旧待发事件，让下一次有效接口读取建立全新的操作记录基准。
-        if raw.get("version") == 1:
+        version = raw.get("version")
+        if version == 1:
             return cls(portfolio_id=portfolio_id)
-        if raw.get("version") != STATE_VERSION:
+        if version not in {2, STATE_VERSION}:
             raise ValueError("不支持的状态文件版本")
 
         fingerprints = raw.get("seen_order_fingerprints", [])
@@ -75,6 +80,8 @@ class MonitorState:
             initialized_at=raw.get("initialized_at"),
             updated_at=raw.get("updated_at"),
             last_order_time=raw.get("last_order_time"),
+            latest_order_fingerprint=raw.get("latest_order_fingerprint"),
+            api_index_value=raw.get("api_index_value"),
             seen_order_fingerprints=[str(item) for item in fingerprints],
             pending=[
                 PendingNotification.from_dict(item)

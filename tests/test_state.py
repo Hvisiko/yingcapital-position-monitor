@@ -23,6 +23,8 @@ def event() -> TradeEvent:
         order_fingerprint="abc123",
         action="OPEN_LONG",
         symbol="BTCUSDT",
+        base_asset="BTC",
+        quote_asset="USDT",
         side="BUY",
         position_side="LONG",
         order_type="MARKET",
@@ -45,7 +47,6 @@ class StateTests(unittest.TestCase):
                         "portfolio_id": PORTFOLIO_ID,
                         "initialized": True,
                         "baseline": {"BTCUSDT:LONG": {}},
-                        "pending": [{"old": "position event"}],
                     }
                 ),
                 encoding="utf-8",
@@ -54,9 +55,34 @@ class StateTests(unittest.TestCase):
 
         self.assertFalse(state.initialized)
         self.assertEqual(state.seen_order_fingerprints, [])
-        self.assertEqual(state.pending, [])
 
-    def test_v2_round_trip(self) -> None:
+    def test_v2_operation_state_migrates_without_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "portfolio_id": PORTFOLIO_ID,
+                        "initialized": True,
+                        "initialized_at": "2026-11-14T23:21:02-05:00",
+                        "updated_at": "2026-11-14T23:22:29-05:00",
+                        "last_order_time": 1794698499143,
+                        "seen_order_fingerprints": ["existing-first-trader"],
+                        "pending": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state = load_state(path, PORTFOLIO_ID)
+
+        self.assertTrue(state.initialized)
+        self.assertEqual(
+            state.seen_order_fingerprints, ["existing-first-trader"]
+        )
+        self.assertEqual(state.last_order_time, 1794698499143)
+
+    def test_v3_round_trip_includes_latest_record_identifiers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             original = MonitorState(
@@ -64,9 +90,11 @@ class StateTests(unittest.TestCase):
                 initialized=True,
                 seen_order_fingerprints=["abc123"],
                 pending=[PendingNotification(event=event())],
-                initialized_at="2026-11-14T20:00:00-05:00",
-                updated_at="2026-11-14T20:00:00-05:00",
+                initialized_at="2026-11-15T00:00:00-05:00",
+                updated_at="2026-11-15T00:00:00-05:00",
                 last_order_time=1000,
+                latest_order_fingerprint="abc123",
+                api_index_value="999",
             )
             save_state(path, original)
             restored = load_state(path, PORTFOLIO_ID)

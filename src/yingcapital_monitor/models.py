@@ -90,6 +90,8 @@ class OrderRecord:
             order_fingerprint=self.fingerprint,
             action=action,
             symbol=self.symbol,
+            base_asset=self.base_asset,
+            quote_asset=self.quote_asset,
             side=self.side,
             position_side=self.position_side,
             order_type=self.order_type,
@@ -106,6 +108,8 @@ class TradeEvent:
     order_fingerprint: str
     action: str
     symbol: str
+    base_asset: str
+    quote_asset: str
     side: str
     position_side: str
     order_type: str
@@ -124,6 +128,8 @@ class TradeEvent:
             "order_fingerprint": self.order_fingerprint,
             "action": self.action,
             "symbol": self.symbol,
+            "base_asset": self.base_asset,
+            "quote_asset": self.quote_asset,
             "side": self.side,
             "position_side": self.position_side,
             "order_type": self.order_type,
@@ -140,6 +146,8 @@ class TradeEvent:
             order_fingerprint=str(raw["order_fingerprint"]),
             action=str(raw["action"]),
             symbol=str(raw["symbol"]),
+            base_asset=str(raw.get("base_asset", "")),
+            quote_asset=str(raw.get("quote_asset", "USDT")),
             side=str(raw["side"]),
             position_side=str(raw["position_side"]),
             order_type=str(raw.get("order_type", "UNKNOWN")),

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yingcapital-position-monitor"
-version = "2.0.0"
-description = "Monitor public Binance lead-trader operation records and send Telegram alerts."
+version = "3.0.0"
+description = "Monitor four public Binance lead-trader operation feeds and send Telegram alerts."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

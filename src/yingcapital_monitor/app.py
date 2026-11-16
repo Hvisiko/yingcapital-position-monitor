@@ -27,7 +27,11 @@ def _now(timezone_name: str) -> str:
     return datetime.now(selected_timezone).isoformat(timespec="seconds")
 
 
-def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]:
+def _deliver_pending(
+    state,
+    settings: Settings,
+    notifier: TelegramNotifier,
+) -> list[str]:
     errors: list[str] = []
     for item in list(state.pending):
         event_id = item.event.event_id
@@ -35,10 +39,10 @@ def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]
             try:
                 notifier.send_telegram(item.event)
                 item.delivered["telegram"] = True
-                # 每次成功后立即落盘，尽量缩小成功发送但尚未记账的窗口。
-                save_state(state_path, state)
+                save_state(settings.state_path, state)
                 LOGGER.info(
-                    "Telegram 已发送：action=%s symbol=%s event=%s",
+                    "[%s] Telegram 已发送：action=%s symbol=%s event=%s",
+                    settings.trader_name,
                     ACTION_LABELS[item.event.action],
                     item.event.symbol,
                     event_id[:12],
@@ -46,14 +50,16 @@ def _deliver_pending(state, state_path, notifier: TelegramNotifier) -> list[str]
             except Exception as error:
                 errors.append(f"Telegram {event_id}: {type(error).__name__}")
                 LOGGER.error(
-                    "Telegram 通知失败，将在下次运行重试：event=%s（详细错误已隐藏）",
+                    "[%s] Telegram 通知失败，将在下次运行重试："
+                    "event=%s（详细错误已隐藏）",
+                    settings.trader_name,
                     event_id[:12],
                 )
 
     state.pending = [
         item for item in state.pending if not all(item.delivered.values())
     ]
-    save_state(state_path, state)
+    save_state(settings.state_path, state)
     return errors
 
 
@@ -70,21 +76,21 @@ def _merge_seen(old: list[str], current: list[str]) -> list[str]:
 def run_monitor(settings: Settings) -> int:
     state = load_state(settings.state_path, settings.portfolio_id)
     notifier = TelegramNotifier(settings)
-
-    # 先重试上一次已发现但未成功发送的真实操作。
-    delivery_errors = _deliver_pending(state, settings.state_path, notifier)
+    delivery_errors = _deliver_pending(state, settings, notifier)
 
     try:
         snapshot = BinanceClient(settings.portfolio_id).fetch_operations()
     except OperationDataUnavailable as error:
         LOGGER.error(
-            "币安最新操作记录当前不可用；保留原状态，不生成任何交易提醒：%s",
+            "[%s] 最新操作记录当前不可用；保留独立状态，不生成提醒：%s",
+            settings.trader_name,
             error,
         )
         return 1
     except BinanceError as error:
         LOGGER.error(
-            "读取币安最新操作记录失败；保留原状态，不生成任何交易提醒：%s",
+            "[%s] 读取最新操作记录失败；保留独立状态，不生成提醒：%s",
+            settings.trader_name,
             error,
         )
         return 1
@@ -92,7 +98,7 @@ def run_monitor(settings: Settings) -> int:
     actual_name = str(snapshot.detail.get("nickname", "")).strip()
     if actual_name and actual_name != settings.trader_name:
         LOGGER.error(
-            "项目昵称不匹配：预期=%s，实际=%s；不更新状态",
+            "[%s] 项目昵称不匹配：实际=%s；不更新该交易员状态",
             settings.trader_name,
             actual_name,
         )
@@ -101,18 +107,27 @@ def run_monitor(settings: Settings) -> int:
     orders = parse_orders(snapshot.order_rows)
     now = _now(settings.timezone)
     fingerprints = [order.fingerprint for order in orders]
-    newest_time = max((order.order_time for order in orders), default=None)
+    latest_order = max(
+        orders,
+        key=lambda order: (order.order_time, order.order_update_time),
+        default=None,
+    )
 
     if not state.initialized:
         state.initialized = True
         state.initialized_at = now
         state.updated_at = now
-        state.last_order_time = newest_time
+        state.last_order_time = latest_order.order_time if latest_order else None
+        state.latest_order_fingerprint = (
+            latest_order.fingerprint if latest_order else None
+        )
+        state.api_index_value = snapshot.index_value
         state.seen_order_fingerprints = _merge_seen([], fingerprints)
         save_state(settings.state_path, state)
         LOGGER.info(
-            "首次有效运行：已将最新 %d 条公开操作记录保存为基准；"
+            "[%s] 首次有效运行：已将最新 %d 条操作记录保存为独立基准；"
             "positionShow=%s；不发送旧交易提醒",
+            settings.trader_name,
             len(orders),
             snapshot.detail.get("positionShow"),
         )
@@ -128,8 +143,9 @@ def run_monitor(settings: Settings) -> int:
         and not any(fingerprint in seen for fingerprint in fingerprints)
     ):
         LOGGER.warning(
-            "最新 100 条记录与旧基准没有交集，期间可能超过接口单页容量；"
-            "仍将当前可见记录逐条处理"
+            "[%s] 最新 100 条记录与旧基准没有交集，期间可能超过接口单页容量；"
+            "仍将当前可见记录逐条处理",
+            settings.trader_name,
         )
 
     existing_pending = {item.event.event_id for item in state.pending}
@@ -139,19 +155,23 @@ def run_monitor(settings: Settings) -> int:
             state.pending.append(PendingNotification(event=event))
             existing_pending.add(event.event_id)
 
-    # 先持久化去重指纹和待发事件，再进行网络通知。
     state.seen_order_fingerprints = _merge_seen(
         state.seen_order_fingerprints, fingerprints
     )
     state.updated_at = now
-    if newest_time is not None:
-        state.last_order_time = max(state.last_order_time or 0, newest_time)
+    state.api_index_value = snapshot.index_value
+    if latest_order is not None:
+        previous_latest_time = state.last_order_time or 0
+        if latest_order.order_time >= previous_latest_time:
+            state.last_order_time = latest_order.order_time
+            state.latest_order_fingerprint = latest_order.fingerprint
     save_state(settings.state_path, state)
 
     if not new_orders:
         LOGGER.info(
-            "最新操作记录无新增：读取=%d，接口总数=%d，positionShow=%s；"
-            "不发送消息",
+            "[%s] 最新操作记录无新增：读取=%d，接口总数=%d，"
+            "positionShow=%s；不发送消息",
+            settings.trader_name,
             len(orders),
             snapshot.total,
             snapshot.detail.get("positionShow"),
@@ -159,28 +179,46 @@ def run_monitor(settings: Settings) -> int:
         return 1 if delivery_errors else 0
 
     LOGGER.info(
-        "检测到 %d 条新增真实操作记录，准备发送 Telegram",
+        "[%s] 检测到 %d 条新增真实操作记录，准备发送 Telegram",
+        settings.trader_name,
         len(new_orders),
     )
-    new_errors = _deliver_pending(state, settings.state_path, notifier)
+    new_errors = _deliver_pending(state, settings, notifier)
     return 1 if delivery_errors or new_errors else 0
+
+
+def run_monitors(settings_list: tuple[Settings, ...]) -> int:
+    failures = 0
+    for settings in settings_list:
+        try:
+            failures += 1 if run_monitor(settings) else 0
+        except Exception as error:
+            failures += 1
+            LOGGER.error(
+                "[%s] 监控执行失败：%s（不影响其他交易员）",
+                settings.trader_name,
+                type(error).__name__,
+            )
+    return 1 if failures else 0
 
 
 def check_api(settings: Settings) -> int:
     try:
         snapshot = BinanceClient(settings.portfolio_id).fetch_operations()
     except OperationDataUnavailable as error:
-        LOGGER.error("最新操作记录接口不可用：%s", error)
+        LOGGER.error("[%s] 最新操作记录接口不可用：%s", settings.trader_name, error)
         return 2
     except BinanceError as error:
-        LOGGER.error("币安接口验证失败：%s", error)
+        LOGGER.error("[%s] 币安接口验证失败：%s", settings.trader_name, error)
         return 1
 
     orders = parse_orders(snapshot.order_rows)
     LOGGER.info(
-        "最新操作记录接口验证成功：nickname=%s，positionShow=%s，"
-        "接口总数=%d，本页有效成交=%d",
+        "[%s] 接口验证成功：nickname=%s，portfolioType=%s，"
+        "positionShow=%s，接口总数=%d，本页有效成交=%d",
+        settings.trader_name,
         snapshot.detail.get("nickname"),
+        snapshot.detail.get("portfolioType"),
         snapshot.detail.get("positionShow"),
         snapshot.total,
         len(orders),
@@ -188,15 +226,23 @@ def check_api(settings: Settings) -> int:
     if orders:
         latest = max(orders, key=lambda order: order.order_time)
         LOGGER.info(
-            "接口最新真实记录：action=%s symbol=%s qty=%s orderTime=%d",
+            "[%s] 最新真实记录：action=%s symbol=%s qty=%s price=%s "
+            "orderTime=%d",
+            settings.trader_name,
             ACTION_LABELS[latest.action or ""],
             latest.symbol,
             latest.executed_qty,
+            latest.avg_price,
             latest.order_time,
         )
     else:
-        LOGGER.info("接口当前没有公开操作记录；空列表本身是有效结果")
+        LOGGER.info("[%s] 当前没有公开操作记录；空列表是有效结果", settings.trader_name)
     return 0
+
+
+def check_apis(settings_list: tuple[Settings, ...]) -> int:
+    results = [check_api(settings) for settings in settings_list]
+    return 0 if all(result == 0 for result in results) else 1
 
 
 def send_test(settings: Settings) -> int:
@@ -205,6 +251,8 @@ def send_test(settings: Settings) -> int:
         order_fingerprint="telegram-connectivity-test",
         action="OPEN_LONG",
         symbol="TESTUSDT",
+        base_asset="TEST",
+        quote_asset="USDT",
         side="BUY",
         position_side="LONG",
         order_type="MARKET",
@@ -224,17 +272,17 @@ def send_test(settings: Settings) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="熬鹰资本币安公开操作记录监控")
+    parser = argparse.ArgumentParser(description="币安四交易员公开操作记录监控")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--check-api",
         action="store_true",
-        help="验证网页最新操作记录接口，不发送通知",
+        help="验证四个最新操作记录接口，不发送通知",
     )
     group.add_argument(
         "--test-notification",
         action="store_true",
-        help="仅发送 Telegram 连通性测试通知",
+        help="仅发送一条 Telegram 连通性测试通知",
     )
     return parser
 
@@ -246,12 +294,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = build_parser().parse_args(argv)
     try:
-        settings = Settings.from_env(require_notifications=not args.check_api)
+        settings_list = Settings.all_from_env(
+            require_notifications=not args.check_api
+        )
         if args.check_api:
-            return check_api(settings)
+            return check_apis(settings_list)
         if args.test_notification:
-            return send_test(settings)
-        return run_monitor(settings)
+            return send_test(settings_list[0])
+        return run_monitors(settings_list)
     except Exception as error:
         LOGGER.error("程序执行失败：%s（详细错误已隐藏）", type(error).__name__)
         return 1

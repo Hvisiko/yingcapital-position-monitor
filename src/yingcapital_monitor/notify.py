@@ -22,15 +22,19 @@ def _format_order_time(milliseconds: int, timezone_name: str) -> str:
 def render_event(event: TradeEvent, settings: Settings) -> str:
     action = ACTION_LABELS[event.action]
     direction = "多" if event.position_side == "LONG" else "空"
-    return "\n".join(
+    quote_asset = event.quote_asset or "USDT"
+    notional_value = event.executed_qty * event.avg_price
+    return chr(10).join(
         [
             f"【{settings.trader_name}】{action}提醒",
-            f"合约：{event.symbol}",
-            f"方向：{direction}",
+            f"交易员：{settings.trader_name}",
+            f"交易对：{event.symbol}",
+            f"操作方向：{action}（{direction}）",
+            f"成交价格：{decimal_text(event.avg_price)} {quote_asset}",
             f"成交数量：{decimal_text(event.executed_qty)}",
-            f"成交均价：{decimal_text(event.avg_price)}",
+            f"成交价值：{decimal_text(notional_value)} {quote_asset}",
             f"订单类型：{event.order_type}",
-            f"已实现盈亏：{decimal_text(event.total_pnl)}",
+            f"已实现盈亏：{decimal_text(event.total_pnl)} {quote_asset}",
             f"操作时间：{_format_order_time(event.order_time, settings.timezone)}",
             f"项目 ID：{settings.portfolio_id}",
             "数据源：币安网页公开最新操作记录（只读）",
