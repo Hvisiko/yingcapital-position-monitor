@@ -96,12 +96,10 @@ def run_monitor(settings: Settings) -> int:
         return 1
 
     actual_name = str(snapshot.detail.get("nickname", "")).strip()
-    expected_name = settings.expected_api_nickname or settings.trader_name
-    if actual_name and actual_name != expected_name:
+    if actual_name and actual_name != settings.trader_name:
         LOGGER.error(
-            "[%s] 项目昵称不匹配：预期=%s，实际=%s；不更新该交易员状态",
+            "[%s] 项目昵称不匹配：实际=%s；不更新该交易员状态",
             settings.trader_name,
-            expected_name,
             actual_name,
         )
         return 1

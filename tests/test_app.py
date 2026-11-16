@@ -18,7 +18,7 @@ from yingcapital_monitor.state import MonitorState, load_state, save_state
 TRADERS = (
     ("5075281354358777856", "熬鹰资本"),
     ("5296057151807357697", "请填写昵称"),
-    ("5247756265911980544", "刀箭穿心BTC"),
+    ("5247756265911980544", "万箭穿心BTC"),
     ("4532994172262753536", "Sky株式会社"),
     ("5271501457743196416", "发烧好了呢"),
 )
@@ -101,11 +101,6 @@ def make_settings(directory: Path) -> tuple[Settings, ...]:
             state_path=directory / f"{portfolio_id}.json",
             telegram_bot_token="not-a-real-token",
             telegram_chat_id="6545798564",
-            expected_api_nickname=(
-                "万箭穿心BTC"
-                if portfolio_id == "5247756265911980544"
-                else name
-            ),
         )
         for portfolio_id, name in TRADERS
     )
@@ -119,11 +114,7 @@ def snapshot(
     return BinanceOperationsSnapshot(
         detail={
             "leadPortfolioId": int(portfolio_id),
-            "nickname": (
-                "万箭穿心BTC"
-                if portfolio_id == "5247756265911980544"
-                else name
-            ),
+            "nickname": name,
             "positionShow": portfolio_id != TRADERS[0][0],
             "portfolioType": "SIGNAL",
         },

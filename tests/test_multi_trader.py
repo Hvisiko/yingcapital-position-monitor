@@ -21,9 +21,6 @@ class MultiTraderConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(len(settings_list), 5)
         self.assertEqual(len({item.state_path for item in settings_list}), 5)
-        third = settings_list[2]
-        self.assertEqual(third.trader_name, "刀箭穿心BTC")
-        self.assertEqual(third.expected_api_nickname, "万箭穿心BTC")
 
     def test_telegram_message_contains_required_trade_fields(self) -> None:
         settings = Settings(
