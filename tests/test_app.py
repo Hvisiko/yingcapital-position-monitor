@@ -23,6 +23,7 @@ TRADERS = (
     ("5271501457743196416", "发烧好了呢"),
     ("5307033607493882624", "勤劳的小蜜蜂_"),
     ("5293752834070546944", "Luke2019"),
+    ("5279472349303626752", "先及格"),
 )
 
 ROWS = {
@@ -117,6 +118,19 @@ ROWS = {
         "orderUpdateTime": 1794867238849,
         "orderTime": 1794867227286,
     },
+    TRADERS[7][0]: {
+        "symbol": "ZECUSDT",
+        "baseAsset": "ZEC",
+        "quoteAsset": "USDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "positionSide": "SHORT",
+        "executedQty": 30.0,
+        "avgPrice": 905.0,
+        "totalPnl": 30.0,
+        "orderUpdateTime": 1794873088331,
+        "orderTime": 1794873088331,
+    },
 }
 
 
@@ -143,7 +157,8 @@ def snapshot(
         detail={
             "leadPortfolioId": int(portfolio_id),
             "nickname": name,
-            "positionShow": portfolio_id != TRADERS[0][0],
+            "positionShow": portfolio_id
+            not in {TRADERS[0][0], TRADERS[7][0]},
             "portfolioType": "SIGNAL",
         },
         order_rows=rows,
@@ -153,7 +168,7 @@ def snapshot(
 
 
 class MonitorTests(unittest.TestCase):
-    def test_seven_traders_baselines_changes_and_dedup_are_independent(self) -> None:
+    def test_eight_traders_baselines_changes_and_dedup_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             settings_list = make_settings(Path(directory_name))
             current = {
@@ -184,30 +199,30 @@ class MonitorTests(unittest.TestCase):
                     side_effect=capture,
                 ),
             ):
-                # 先模拟原有六位已存在的基准。
-                self.assertEqual(run_monitors(settings_list[:6]), 0)
+                # 先模拟原有七位已存在的基准。
+                self.assertEqual(run_monitors(settings_list[:7]), 0)
                 self.assertEqual(sent, [])
                 original_seen = {
                     item.portfolio_id: load_state(
                         item.state_path, item.portfolio_id
                     ).seen_order_fingerprints.copy()
-                    for item in settings_list[:6]
+                    for item in settings_list[:7]
                 }
 
-                # 加入第七位时，前六位不重置，第七位只建基准。
+                # 加入第八位时，前七位不重置，第八位只建基准。
                 self.assertEqual(run_monitors(settings_list), 0)
                 self.assertEqual(sent, [])
-                for item in settings_list[:6]:
+                for item in settings_list[:7]:
                     state = load_state(item.state_path, item.portfolio_id)
                     self.assertEqual(
                         state.seen_order_fingerprints,
                         original_seen[item.portfolio_id],
                     )
-                seventh_state = load_state(
-                    settings_list[6].state_path, settings_list[6].portfolio_id
+                eighth_state = load_state(
+                    settings_list[7].state_path, settings_list[7].portfolio_id
                 )
-                self.assertTrue(seventh_state.initialized)
-                self.assertEqual(len(seventh_state.seen_order_fingerprints), 1)
+                self.assertTrue(eighth_state.initialized)
+                self.assertEqual(len(eighth_state.seen_order_fingerprints), 1)
 
                 # 每位各增加一条，必须分别通知且互不覆盖。
                 changed = {}
@@ -219,6 +234,7 @@ class MonitorTests(unittest.TestCase):
                     ("SELL", "LONG", 0),
                     ("BUY", "SHORT", 0),
                     ("BUY", "BOTH", 12.5),
+                    ("SELL", "SHORT", 0),
                 )
                 for index, item in enumerate(settings_list, start=1):
                     old = ROWS[item.portfolio_id]
@@ -249,11 +265,11 @@ class MonitorTests(unittest.TestCase):
                     {portfolio_id for portfolio_id, _ in sent},
                     {portfolio_id for portfolio_id, _ in TRADERS},
                 )
-                self.assertEqual(len(sent), 7)
+                self.assertEqual(len(sent), 8)
 
                 # 相同数据再次运行，不能重复通知。
                 self.assertEqual(run_monitors(settings_list), 0)
-                self.assertEqual(len(sent), 7)
+                self.assertEqual(len(sent), 8)
 
             for item in settings_list:
                 state = load_state(item.state_path, item.portfolio_id)
@@ -261,6 +277,46 @@ class MonitorTests(unittest.TestCase):
                 self.assertIsNotNone(state.latest_order_fingerprint)
                 self.assertIsNotNone(state.api_index_value)
                 self.assertEqual(state.pending, [])
+
+    def test_changing_display_nickname_keeps_existing_dedup_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            configured = make_settings(Path(directory_name))[0]
+            live_snapshot = snapshot(
+                configured.portfolio_id,
+                configured.trader_name,
+                [ROWS[configured.portfolio_id]],
+            )
+            renamed = Settings(
+                portfolio_id=configured.portfolio_id,
+                trader_name="自定义显示昵称",
+                timezone=configured.timezone,
+                state_path=configured.state_path,
+                telegram_bot_token=configured.telegram_bot_token,
+                telegram_chat_id=configured.telegram_chat_id,
+            )
+
+            with (
+                patch(
+                    "yingcapital_monitor.app.BinanceClient.fetch_operations",
+                    return_value=live_snapshot,
+                ),
+                patch(
+                    "yingcapital_monitor.app.TelegramNotifier.send_telegram"
+                ) as send,
+            ):
+                self.assertEqual(run_monitor(configured), 0)
+                before = load_state(
+                    configured.state_path, configured.portfolio_id
+                )
+                self.assertEqual(run_monitor(renamed), 0)
+                after = load_state(renamed.state_path, renamed.portfolio_id)
+
+            self.assertEqual(after.initialized_at, before.initialized_at)
+            self.assertEqual(
+                after.seen_order_fingerprints,
+                before.seen_order_fingerprints,
+            )
+            send.assert_not_called()
 
     def test_unavailable_one_trader_preserves_its_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

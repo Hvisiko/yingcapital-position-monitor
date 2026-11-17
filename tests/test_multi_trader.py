@@ -1,26 +1,37 @@
 from __future__ import annotations
 
+import json
 import unittest
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from yingcapital_monitor.config import DEFAULT_TRADERS, Settings
+from yingcapital_monitor.config import Settings
 from yingcapital_monitor.models import TradeEvent
 from yingcapital_monitor.notify import _format_order_time, render_event
 
 
 class MultiTraderConfigurationTests(unittest.TestCase):
-    def test_seven_default_traders_have_unique_state_files(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+    def test_eight_default_traders_have_unique_state_files(self) -> None:
+        config_path = Path(__file__).resolve().parents[1] / "traders.json"
+        traders = json.loads(config_path.read_text(encoding="utf-8"))
+        with patch.dict(
+            "os.environ",
+            {"TRADERS_CONFIG_PATH": str(config_path)},
+            clear=True,
+        ):
             settings_list = Settings.all_from_env(require_notifications=False)
 
         self.assertEqual(
             [(item.portfolio_id, item.trader_name) for item in settings_list],
-            list(DEFAULT_TRADERS),
+            [
+                (item["portfolio_id"], item["nickname"])
+                for item in traders
+                if item["enabled"]
+            ],
         )
-        self.assertEqual(len(settings_list), 7)
-        self.assertEqual(len({item.state_path for item in settings_list}), 7)
+        self.assertEqual(len(settings_list), 8)
+        self.assertEqual(len({item.state_path for item in settings_list}), 8)
 
     def test_telegram_message_contains_required_trade_fields(self) -> None:
         settings = Settings(
@@ -93,6 +104,10 @@ class MultiTraderConfigurationTests(unittest.TestCase):
         summer = _format_order_time(1784131200000, "America/New_York")
         self.assertEqual(winter, "2026-11-16T09:16:54-05:00")
         self.assertEqual(summer, "2026-07-15T12:00:00-04:00")
+        self.assertEqual(
+            _format_order_time(1794873088331, "America/New_York"),
+            "2026-11-16T18:51:28-05:00",
+        )
 
     def test_one_way_mode_message_uses_action_direction(self) -> None:
         settings = Settings(

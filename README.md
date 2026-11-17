@@ -1,6 +1,6 @@
-# 币安七交易员公开操作记录监控
+# 币安八交易员公开操作记录监控
 
-本项目每 5 分钟在同一个 GitHub Actions 工作流中读取七位交易员的网页“最新操作记录”：
+本项目每 5 分钟在同一个 GitHub Actions 工作流中读取已启用交易员的网页“最新操作记录”。交易员名单只保存在 [`traders.json`](traders.json)：
 
 | 交易员 | 项目 ID |
 |---|---|
@@ -11,9 +11,29 @@
 | 发烧好了呢 | 5271501457743196416 |
 | 勤劳的小蜜蜂_ | 5307033607493882624 |
 | Luke2019 | 5293752834070546944 |
+| 先及格 | 5279472349303626752 |
 
-第三位的币安接口实际昵称是“万箭穿心BTC”，程序直接核验该昵称。
-第六位的币安接口实际昵称是“勤劳的小蜜蜂_”（末尾含下划线），程序使用接口真实昵称进行核验和通知。
+## 以后只需修改 traders.json
+
+在 GitHub 仓库打开 `traders.json`，点击铅笔图标编辑并提交即可。Cloudflare 下一次触发同一个工作流时会自动读取新名单，不需要修改 Python、GitHub Actions、Worker 或 Secrets。
+
+每项只有三个公开字段：
+
+```json
+{
+  "nickname": "显示昵称",
+  "portfolio_id": "币安项目 ID",
+  "enabled": true
+}
+```
+
+- **添加**：在数组末尾逗号分隔地追加一项。项目 ID 必须放在英文双引号中，新项目首次成功读取只建立基准。
+- **暂停**：把该项的 `"enabled": true` 改成 `"enabled": false`。
+- **恢复**：把 `false` 改回 `true`。程序继续使用原项目 ID 的历史状态和去重记录。
+- **修改昵称**：只改 `nickname`。昵称是 Telegram 显示名称，项目 ID 与状态文件不变。
+- **删除**：从数组删除整项。工作流仍保留该项目的历史状态文件；以后用相同项目 ID 重新添加时可继续原状态。
+
+`enabled` 必须使用不带引号的小写 `true` 或 `false`；项目 ID 不得重复。配置格式、字段类型或重复 ID 有误时，程序会停止并标记工作流失败，不会产生交易提醒。配置文件不得放 Token、密码或其他敏感信息。
 
 识别规则：
 
@@ -28,7 +48,7 @@
 
 ## 独立状态与通知保证
 
-七位交易员分别使用以下状态文件：
+当前八位交易员分别使用以下状态文件：
 
     .runtime/5075281354358777856.json
     .runtime/5296057151807357697.json
@@ -37,6 +57,7 @@
     .runtime/5271501457743196416.json
     .runtime/5307033607493882624.json
     .runtime/5293752834070546944.json
+    .runtime/5279472349303626752.json
 
 每份文件分别保存基准、最新操作时间、最新操作指纹、币安接口游标、去重指纹和待发送事件，互不覆盖。
 
@@ -46,6 +67,7 @@
 4. 一个接口失败不会阻止其他交易员继续检查，但工作流最终会标记失败以便发现问题。
 5. positionShow 不控制操作记录监控。仓位隐藏时，只要独立操作记录接口有效，仍正常处理。
 6. data=null、HTTP 错误或格式异常时保留该交易员原状态，不产生虚假提醒。
+7. 暂停或从名单删除只停止检查，不删除 `monitor-state` 分支中的历史状态。
 
 Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空、成交价格、成交数量、名义价值、操作时间、订单类型和项目 ID。
 
@@ -53,7 +75,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 
 ## 已验证接口
 
-七个项目均通过以下币安网页公开只读接口验证：
+八个项目均通过以下币安网页公开只读接口验证：
 
     POST /bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history
 
@@ -66,6 +88,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 - 发烧好了呢：SIGNAL 项目，接口有效，读取到真实 SOXS、AMD、MUU、MU 操作。
 - 勤劳的小蜜蜂_：PUBLIC 项目，接口有效，读取到真实 ZECUSDT 操作。
 - Luke2019：SIGNAL 项目，接口有效，读取到真实 HYPE、ETH、AAVE 操作；使用 `BOTH` 单向持仓模式。
+- 先及格：SIGNAL 项目，positionShow=false，但操作记录接口有效，读取到真实 ZECUSDT 操作。
 
 只验证接口而不发消息：
 
@@ -79,8 +102,10 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 
 只保留 `.github/workflows/monitor.yml` 一个工作流，由现有 Cloudflare Worker Cron Trigger 每 5 分钟通过 `workflow_dispatch` 触发；工作流仍可手动运行。
 
-七位交易员共用现有 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 两个 Repository Secrets，无需新增密钥或机器人。状态保存在独立 monitor-state 分支。
+八位交易员共用现有 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 两个 Repository Secrets，无需新增密钥或机器人。状态保存在独立 monitor-state 分支。
 
 公开仓库使用标准 ubuntu-slim GitHub-hosted runner。Cloudflare 只负责触发同一个 GitHub Actions 工作流；监控程序仍通过独立去重状态补抓最新记录窗口内的交易。
+
+程序按顺序对每位启用交易员调用项目详情和操作记录两个公开接口。接口对 429 和临时 5xx 错误有自动退避重试；工作流超时为 5 分钟。交易时间使用同一操作行的 `orderUpdateTime`，按 `America/New_York` 转换并自动处理夏令时。
 
 本项目不会启用收费服务，也不会进行任何真实交易。

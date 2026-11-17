@@ -97,12 +97,12 @@ def run_monitor(settings: Settings) -> int:
 
     actual_name = str(snapshot.detail.get("nickname", "")).strip()
     if actual_name and actual_name != settings.trader_name:
-        LOGGER.error(
-            "[%s] 项目昵称不匹配：实际=%s；不更新该交易员状态",
+        LOGGER.warning(
+            "[%s] 配置显示昵称与币安昵称不同：实际=%s；"
+            "项目 ID 已验证，继续使用配置昵称监控",
             settings.trader_name,
             actual_name,
         )
-        return 1
 
     orders = parse_orders(snapshot.order_rows)
     now = _now(settings.timezone)
@@ -274,12 +274,12 @@ def send_test(settings: Settings) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="币安七交易员公开操作记录监控")
+    parser = argparse.ArgumentParser(description="币安交易员公开操作记录监控")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--check-api",
         action="store_true",
-        help="验证七个最新操作记录接口，不发送通知",
+        help="验证所有已启用交易员的最新操作记录接口，不发送通知",
     )
     group.add_argument(
         "--test-notification",

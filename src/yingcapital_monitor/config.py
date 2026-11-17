@@ -1,19 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_TRADERS = (
-    ("5075281354358777856", "熬鹰资本"),
-    ("5296057151807357697", "请填写昵称"),
-    ("5247756265911980544", "万箭穿心BTC"),
-    ("4532994172262753536", "Sky株式会社"),
-    ("5271501457743196416", "发烧好了呢"),
-    ("5307033607493882624", "勤劳的小蜜蜂_"),
-    ("5293752834070546944", "Luke2019"),
-)
+DEFAULT_TRADERS_CONFIG_PATH = Path("traders.json")
 
 
 @dataclass(frozen=True)
@@ -31,17 +24,55 @@ class Settings:
     ) -> tuple["Settings", ...]:
         timezone = os.getenv("MONITOR_TIMEZONE", "America/New_York").strip()
         state_dir = Path(os.getenv("MONITOR_STATE_DIR", ".runtime"))
+        config_path = Path(
+            os.getenv(
+                "TRADERS_CONFIG_PATH", str(DEFAULT_TRADERS_CONFIG_PATH)
+            ).strip()
+        )
         telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                traders = json.load(handle)
+        except FileNotFoundError as error:
+            raise ValueError(f"交易员配置文件不存在：{config_path}") from error
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"交易员配置文件 JSON 格式错误：第 {error.lineno} 行"
+            ) from error
+
+        if not isinstance(traders, list):
+            raise ValueError("交易员配置文件最外层必须是 JSON 数组")
+
         settings: list[Settings] = []
-        for index, (default_id, default_name) in enumerate(DEFAULT_TRADERS, start=1):
-            portfolio_id = os.getenv(
-                f"BINANCE_TRADER_{index}_PORTFOLIO_ID", default_id
-            ).strip()
-            trader_name = os.getenv(
-                f"BINANCE_TRADER_{index}_NAME", default_name
-            ).strip()
+        portfolio_ids: set[str] = set()
+        for index, trader in enumerate(traders, start=1):
+            if not isinstance(trader, dict):
+                raise ValueError(f"第 {index} 个交易员必须是 JSON 对象")
+            extra_fields = set(trader) - {"nickname", "portfolio_id", "enabled"}
+            if extra_fields:
+                raise ValueError(
+                    f"第 {index} 个交易员包含不允许的字段："
+                    + ", ".join(sorted(extra_fields))
+                )
+
+            portfolio_id = trader.get("portfolio_id")
+            trader_name = trader.get("nickname")
+            enabled = trader.get("enabled")
+            if not isinstance(portfolio_id, str):
+                raise ValueError(
+                    f"第 {index} 个交易员的 portfolio_id 必须使用引号"
+                )
+            if not isinstance(trader_name, str):
+                raise ValueError(f"第 {index} 个交易员的 nickname 必须是文字")
+            if not isinstance(enabled, bool):
+                raise ValueError(
+                    f"第 {index} 个交易员的 enabled 必须是 true 或 false"
+                )
+
+            portfolio_id = portfolio_id.strip()
+            trader_name = trader_name.strip()
             item = cls(
                 portfolio_id=portfolio_id,
                 trader_name=trader_name,
@@ -50,12 +81,15 @@ class Settings:
                 telegram_bot_token=telegram_bot_token,
                 telegram_chat_id=telegram_chat_id,
             )
-            item.validate(require_notifications=require_notifications)
-            settings.append(item)
+            item.validate(
+                require_notifications=require_notifications and enabled
+            )
+            if portfolio_id in portfolio_ids:
+                raise ValueError(f"交易员项目 ID 重复：{portfolio_id}")
+            portfolio_ids.add(portfolio_id)
+            if enabled:
+                settings.append(item)
 
-        portfolio_ids = [item.portfolio_id for item in settings]
-        if len(portfolio_ids) != len(set(portfolio_ids)):
-            raise ValueError("交易员的项目 ID 不能重复")
         return tuple(settings)
 
     def validate(self, *, require_notifications: bool) -> None:

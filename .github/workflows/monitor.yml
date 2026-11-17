@@ -34,14 +34,15 @@ jobs:
         run: |
           mkdir -p .runtime
           if git fetch origin monitor-state:refs/remotes/origin/monitor-state; then
-            for portfolio_id in 5075281354358777856 5296057151807357697 5247756265911980544 4532994172262753536 5271501457743196416 5307033607493882624 5293752834070546944; do
-              if git cat-file -e "origin/monitor-state:${portfolio_id}.json" 2>/dev/null; then
-                git show "origin/monitor-state:${portfolio_id}.json" > ".runtime/${portfolio_id}.json"
-              elif [ "${portfolio_id}" = "5075281354358777856" ] && git cat-file -e origin/monitor-state:state.json 2>/dev/null; then
-                # 兼容升级前的熬鹰资本单文件状态，绝不重置原基准。
-                git show origin/monitor-state:state.json > ".runtime/${portfolio_id}.json"
+            while IFS= read -r state_file; do
+              if [[ "${state_file}" =~ ^[0-9]+\.json$ ]]; then
+                git show "origin/monitor-state:${state_file}" > ".runtime/${state_file}"
               fi
-            done
+            done < <(git ls-tree -r --name-only origin/monitor-state)
+            if [ ! -f .runtime/5075281354358777856.json ] && git cat-file -e origin/monitor-state:state.json 2>/dev/null; then
+              # 兼容升级前的熬鹰资本单文件状态，绝不重置原基准。
+              git show origin/monitor-state:state.json > .runtime/5075281354358777856.json
+            fi
           else
             echo "No state branch yet; each trader will create an independent baseline."
           fi
@@ -51,20 +52,7 @@ jobs:
         if: ${{ !inputs.test_notification }}
         continue-on-error: true
         env:
-          BINANCE_TRADER_1_PORTFOLIO_ID: "5075281354358777856"
-          BINANCE_TRADER_1_NAME: "熬鹰资本"
-          BINANCE_TRADER_2_PORTFOLIO_ID: "5296057151807357697"
-          BINANCE_TRADER_2_NAME: "请填写昵称"
-          BINANCE_TRADER_3_PORTFOLIO_ID: "5247756265911980544"
-          BINANCE_TRADER_3_NAME: "万箭穿心BTC"
-          BINANCE_TRADER_4_PORTFOLIO_ID: "4532994172262753536"
-          BINANCE_TRADER_4_NAME: "Sky株式会社"
-          BINANCE_TRADER_5_PORTFOLIO_ID: "5271501457743196416"
-          BINANCE_TRADER_5_NAME: "发烧好了呢"
-          BINANCE_TRADER_6_PORTFOLIO_ID: "5307033607493882624"
-          BINANCE_TRADER_6_NAME: "勤劳的小蜜蜂_"
-          BINANCE_TRADER_7_PORTFOLIO_ID: "5293752834070546944"
-          BINANCE_TRADER_7_NAME: "Luke2019"
+          TRADERS_CONFIG_PATH: "traders.json"
           MONITOR_TIMEZONE: "America/New_York"
           MONITOR_STATE_DIR: ".runtime"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -77,6 +65,7 @@ jobs:
         if: ${{ inputs.test_notification }}
         continue-on-error: true
         env:
+          TRADERS_CONFIG_PATH: "traders.json"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONPATH: "src"
