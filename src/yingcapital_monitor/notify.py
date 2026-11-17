@@ -22,8 +22,7 @@ def _format_order_time(milliseconds: int, timezone_name: str) -> str:
 def render_event(event: TradeEvent, settings: Settings) -> str:
     action = ACTION_LABELS[event.action]
     if event.action in {"BUY_DIRECTION", "SELL_DIRECTION"}:
-        side_label = "买入" if event.side == "BUY" else "卖出"
-        operation_text = f"{action}（{side_label}；单向模式，开/平仓未公开）"
+        operation_text = f"{action}（开平待确认）"
     elif event.action == "DIRECTION_UNCONFIRMED":
         side_label = "买入" if event.side == "BUY" else "卖出"
         possibilities = "开多或平空" if event.side == "BUY" else "开空或平多"

@@ -42,7 +42,7 @@
 - SELL + LONG：平多
 - BUY + SHORT：平空
 
-`positionSide=BOTH` 表示单向持仓模式。公开操作记录没有 `reduceOnly`、`OPEN/CLOSE` 或成交前后仓位字段；`totalPnl` 也不能可靠区分开仓和平仓。为与币安网页一致，BUY 显示“做多（买入）”，SELL 显示“做空（卖出）”，并明确注明“单向模式，开/平仓未公开”，绝不把做多/做空猜成开多/开空。
+`positionSide=BOTH` 表示单向持仓模式。公开操作记录没有 `reduceOnly`、`OPEN/CLOSE` 或成交前后仓位字段；`totalPnl` 也不能可靠区分开仓和平仓。为与币安网页一致，BUY 显示“做多（开平待确认）”，SELL 显示“做空（开平待确认）”，绝不把做多/做空猜成开仓。
 
 程序没有下单、撤单、账户或资金接口，不需要币安 API Key，不调用 OpenAI API、ChatGPT、Codex 或任何付费模型。
 

@@ -137,7 +137,7 @@ class MultiTraderConfigurationTests(unittest.TestCase):
         message = render_event(event, settings)
         self.assertIn("交易员：Luke2019", message)
         self.assertIn(
-            "操作方向：做空（卖出；单向模式，开/平仓未公开）",
+            "操作方向：做空（开平待确认）",
             message,
         )
         self.assertNotIn("操作方向：开空", message)
