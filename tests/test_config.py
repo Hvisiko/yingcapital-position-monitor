@@ -165,6 +165,16 @@ class TraderConfigurationTests(unittest.TestCase):
         self.assertNotIn("BINANCE_TRADER_", workflow)
         self.assertNotIn("for portfolio_id in", workflow)
 
+    def test_workflow_serializes_frequent_monitor_runs(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/monitor.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("group: yingcapital-position-monitor", workflow)
+        self.assertIn("queue: single", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("timeout-minutes: 5", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

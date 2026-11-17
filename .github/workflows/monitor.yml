@@ -14,11 +14,14 @@ permissions:
 
 concurrency:
   group: yingcapital-position-monitor
+  # 保留当前运行，拥堵时只等待最新一轮，避免过期轮询积压和状态分支并发覆盖。
+  queue: single
   cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-slim
+    # 为币安重试和 GitHub 平台长尾预留空间；并发组仍保证不会重叠执行。
     timeout-minutes: 5
     steps:
       - name: Checkout
