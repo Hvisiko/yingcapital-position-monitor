@@ -11,7 +11,7 @@ from yingcapital_monitor.notify import _format_order_time, render_event
 
 
 class MultiTraderConfigurationTests(unittest.TestCase):
-    def test_five_default_traders_have_unique_state_files(self) -> None:
+    def test_six_default_traders_have_unique_state_files(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             settings_list = Settings.all_from_env(require_notifications=False)
 
@@ -19,8 +19,8 @@ class MultiTraderConfigurationTests(unittest.TestCase):
             [(item.portfolio_id, item.trader_name) for item in settings_list],
             list(DEFAULT_TRADERS),
         )
-        self.assertEqual(len(settings_list), 5)
-        self.assertEqual(len({item.state_path for item in settings_list}), 5)
+        self.assertEqual(len(settings_list), 6)
+        self.assertEqual(len({item.state_path for item in settings_list}), 6)
 
     def test_telegram_message_contains_required_trade_fields(self) -> None:
         settings = Settings(

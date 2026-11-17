@@ -11,6 +11,7 @@ DEFAULT_TRADERS = (
     ("5247756265911980544", "万箭穿心BTC"),
     ("4532994172262753536", "Sky株式会社"),
     ("5271501457743196416", "发烧好了呢"),
+    ("5307033607493882624", "勤劳的小蜜蜂_"),
 )
 
 
@@ -53,7 +54,7 @@ class Settings:
 
         portfolio_ids = [item.portfolio_id for item in settings]
         if len(portfolio_ids) != len(set(portfolio_ids)):
-            raise ValueError("五个交易员的项目 ID 不能重复")
+            raise ValueError("交易员的项目 ID 不能重复")
         return tuple(settings)
 
     def validate(self, *, require_notifications: bool) -> None:

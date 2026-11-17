@@ -21,6 +21,7 @@ TRADERS = (
     ("5247756265911980544", "万箭穿心BTC"),
     ("4532994172262753536", "Sky株式会社"),
     ("5271501457743196416", "发烧好了呢"),
+    ("5307033607493882624", "勤劳的小蜜蜂_"),
 )
 
 ROWS = {
@@ -89,6 +90,19 @@ ROWS = {
         "orderUpdateTime": 1794668082533,
         "orderTime": 1794668082533,
     },
+    TRADERS[5][0]: {
+        "symbol": "ZECUSDT",
+        "baseAsset": "ZEC",
+        "quoteAsset": "USDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "positionSide": "LONG",
+        "executedQty": 10.0,
+        "avgPrice": 860.0,
+        "totalPnl": 0.0,
+        "orderUpdateTime": 1794833301704,
+        "orderTime": 1794724573611,
+    },
 }
 
 
@@ -125,7 +139,7 @@ def snapshot(
 
 
 class MonitorTests(unittest.TestCase):
-    def test_five_traders_baselines_changes_and_dedup_are_independent(self) -> None:
+    def test_six_traders_baselines_changes_and_dedup_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             settings_list = make_settings(Path(directory_name))
             current = {
@@ -156,30 +170,30 @@ class MonitorTests(unittest.TestCase):
                     side_effect=capture,
                 ),
             ):
-                # 先模拟原有四位已存在的基准。
-                self.assertEqual(run_monitors(settings_list[:4]), 0)
+                # 先模拟原有五位已存在的基准。
+                self.assertEqual(run_monitors(settings_list[:5]), 0)
                 self.assertEqual(sent, [])
                 original_seen = {
                     item.portfolio_id: load_state(
                         item.state_path, item.portfolio_id
                     ).seen_order_fingerprints.copy()
-                    for item in settings_list[:4]
+                    for item in settings_list[:5]
                 }
 
-                # 加入第五位时，前四位不重置，第五位只建基准。
+                # 加入第六位时，前五位不重置，第六位只建基准。
                 self.assertEqual(run_monitors(settings_list), 0)
                 self.assertEqual(sent, [])
-                for item in settings_list[:4]:
+                for item in settings_list[:5]:
                     state = load_state(item.state_path, item.portfolio_id)
                     self.assertEqual(
                         state.seen_order_fingerprints,
                         original_seen[item.portfolio_id],
                     )
-                fifth_state = load_state(
-                    settings_list[4].state_path, settings_list[4].portfolio_id
+                sixth_state = load_state(
+                    settings_list[5].state_path, settings_list[5].portfolio_id
                 )
-                self.assertTrue(fifth_state.initialized)
-                self.assertEqual(len(fifth_state.seen_order_fingerprints), 1)
+                self.assertTrue(sixth_state.initialized)
+                self.assertEqual(len(sixth_state.seen_order_fingerprints), 1)
 
                 # 每位各增加一条，必须分别通知且互不覆盖。
                 changed = {}
@@ -189,6 +203,7 @@ class MonitorTests(unittest.TestCase):
                     ("SELL", "SHORT"),
                     ("BUY", "LONG"),
                     ("SELL", "LONG"),
+                    ("BUY", "SHORT"),
                 )
                 for index, item in enumerate(settings_list, start=1):
                     old = ROWS[item.portfolio_id]
@@ -218,11 +233,11 @@ class MonitorTests(unittest.TestCase):
                     {portfolio_id for portfolio_id, _ in sent},
                     {portfolio_id for portfolio_id, _ in TRADERS},
                 )
-                self.assertEqual(len(sent), 5)
+                self.assertEqual(len(sent), 6)
 
                 # 相同数据再次运行，不能重复通知。
                 self.assertEqual(run_monitors(settings_list), 0)
-                self.assertEqual(len(sent), 5)
+                self.assertEqual(len(sent), 6)
 
             for item in settings_list:
                 state = load_state(item.state_path, item.portfolio_id)

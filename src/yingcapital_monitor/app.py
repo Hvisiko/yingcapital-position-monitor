@@ -274,12 +274,12 @@ def send_test(settings: Settings) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="币安五交易员公开操作记录监控")
+    parser = argparse.ArgumentParser(description="币安六交易员公开操作记录监控")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--check-api",
         action="store_true",
-        help="验证五个最新操作记录接口，不发送通知",
+        help="验证六个最新操作记录接口，不发送通知",
     )
     group.add_argument(
         "--test-notification",
