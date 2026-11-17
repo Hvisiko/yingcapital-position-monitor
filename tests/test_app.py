@@ -22,6 +22,7 @@ TRADERS = (
     ("4532994172262753536", "Sky株式会社"),
     ("5271501457743196416", "发烧好了呢"),
     ("5307033607493882624", "勤劳的小蜜蜂_"),
+    ("5293752834070546944", "Luke2019"),
 )
 
 ROWS = {
@@ -103,6 +104,19 @@ ROWS = {
         "orderUpdateTime": 1794833301704,
         "orderTime": 1794724573611,
     },
+    TRADERS[6][0]: {
+        "symbol": "HYPEUSDT",
+        "baseAsset": "HYPE",
+        "quoteAsset": "USDT",
+        "side": "SELL",
+        "type": "LIMIT",
+        "positionSide": "BOTH",
+        "executedQty": 10.0,
+        "avgPrice": 70.7,
+        "totalPnl": 0.0,
+        "orderUpdateTime": 1794867238849,
+        "orderTime": 1794867227286,
+    },
 }
 
 
@@ -139,7 +153,7 @@ def snapshot(
 
 
 class MonitorTests(unittest.TestCase):
-    def test_six_traders_baselines_changes_and_dedup_are_independent(self) -> None:
+    def test_seven_traders_baselines_changes_and_dedup_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             settings_list = make_settings(Path(directory_name))
             current = {
@@ -170,48 +184,50 @@ class MonitorTests(unittest.TestCase):
                     side_effect=capture,
                 ),
             ):
-                # 先模拟原有五位已存在的基准。
-                self.assertEqual(run_monitors(settings_list[:5]), 0)
+                # 先模拟原有六位已存在的基准。
+                self.assertEqual(run_monitors(settings_list[:6]), 0)
                 self.assertEqual(sent, [])
                 original_seen = {
                     item.portfolio_id: load_state(
                         item.state_path, item.portfolio_id
                     ).seen_order_fingerprints.copy()
-                    for item in settings_list[:5]
+                    for item in settings_list[:6]
                 }
 
-                # 加入第六位时，前五位不重置，第六位只建基准。
+                # 加入第七位时，前六位不重置，第七位只建基准。
                 self.assertEqual(run_monitors(settings_list), 0)
                 self.assertEqual(sent, [])
-                for item in settings_list[:5]:
+                for item in settings_list[:6]:
                     state = load_state(item.state_path, item.portfolio_id)
                     self.assertEqual(
                         state.seen_order_fingerprints,
                         original_seen[item.portfolio_id],
                     )
-                sixth_state = load_state(
-                    settings_list[5].state_path, settings_list[5].portfolio_id
+                seventh_state = load_state(
+                    settings_list[6].state_path, settings_list[6].portfolio_id
                 )
-                self.assertTrue(sixth_state.initialized)
-                self.assertEqual(len(sixth_state.seen_order_fingerprints), 1)
+                self.assertTrue(seventh_state.initialized)
+                self.assertEqual(len(seventh_state.seen_order_fingerprints), 1)
 
                 # 每位各增加一条，必须分别通知且互不覆盖。
                 changed = {}
-                action_sides = (
-                    ("SELL", "LONG"),
-                    ("BUY", "SHORT"),
-                    ("SELL", "SHORT"),
-                    ("BUY", "LONG"),
-                    ("SELL", "LONG"),
-                    ("BUY", "SHORT"),
+                action_specs = (
+                    ("SELL", "LONG", 0),
+                    ("BUY", "SHORT", 0),
+                    ("SELL", "SHORT", 0),
+                    ("BUY", "LONG", 0),
+                    ("SELL", "LONG", 0),
+                    ("BUY", "SHORT", 0),
+                    ("BUY", "BOTH", 12.5),
                 )
                 for index, item in enumerate(settings_list, start=1):
                     old = ROWS[item.portfolio_id]
-                    side, position_side = action_sides[index - 1]
+                    side, position_side, total_pnl = action_specs[index - 1]
                     new = {
                         **old,
                         "side": side,
                         "positionSide": position_side,
+                        "totalPnl": total_pnl,
                         "executedQty": index,
                         "avgPrice": float(old["avgPrice"]) + index,
                         "orderTime": int(old["orderTime"]) + 600_000,
@@ -233,11 +249,11 @@ class MonitorTests(unittest.TestCase):
                     {portfolio_id for portfolio_id, _ in sent},
                     {portfolio_id for portfolio_id, _ in TRADERS},
                 )
-                self.assertEqual(len(sent), 6)
+                self.assertEqual(len(sent), 7)
 
                 # 相同数据再次运行，不能重复通知。
                 self.assertEqual(run_monitors(settings_list), 0)
-                self.assertEqual(len(sent), 6)
+                self.assertEqual(len(sent), 7)
 
             for item in settings_list:
                 state = load_state(item.state_path, item.portfolio_id)

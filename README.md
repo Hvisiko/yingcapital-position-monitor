@@ -1,6 +1,6 @@
-# 币安六交易员公开操作记录监控
+# 币安七交易员公开操作记录监控
 
-本项目每 5 分钟在同一个 GitHub Actions 工作流中读取六位交易员的网页“最新操作记录”：
+本项目每 5 分钟在同一个 GitHub Actions 工作流中读取七位交易员的网页“最新操作记录”：
 
 | 交易员 | 项目 ID |
 |---|---|
@@ -10,6 +10,7 @@
 | Sky株式会社 | 4532994172262753536 |
 | 发烧好了呢 | 5271501457743196416 |
 | 勤劳的小蜜蜂_ | 5307033607493882624 |
+| Luke2019 | 5293752834070546944 |
 
 第三位的币安接口实际昵称是“万箭穿心BTC”，程序直接核验该昵称。
 第六位的币安接口实际昵称是“勤劳的小蜜蜂_”（末尾含下划线），程序使用接口真实昵称进行核验和通知。
@@ -21,11 +22,13 @@
 - SELL + LONG：平多
 - BUY + SHORT：平空
 
+`positionSide=BOTH` 表示单向持仓模式。公开操作记录没有 `reduceOnly` 字段，程序按同一行的 `side` 和 `totalPnl` 区分：零已实现盈亏的 BUY/SELL 为开多/开空，非零已实现盈亏的 SELL/BUY 为平多/平空。
+
 程序没有下单、撤单、账户或资金接口，不需要币安 API Key，不调用 OpenAI API、ChatGPT、Codex 或任何付费模型。
 
 ## 独立状态与通知保证
 
-六位交易员分别使用以下状态文件：
+七位交易员分别使用以下状态文件：
 
     .runtime/5075281354358777856.json
     .runtime/5296057151807357697.json
@@ -33,6 +36,7 @@
     .runtime/4532994172262753536.json
     .runtime/5271501457743196416.json
     .runtime/5307033607493882624.json
+    .runtime/5293752834070546944.json
 
 每份文件分别保存基准、最新操作时间、最新操作指纹、币安接口游标、去重指纹和待发送事件，互不覆盖。
 
@@ -49,7 +53,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 
 ## 已验证接口
 
-六个项目均通过以下币安网页公开只读接口验证：
+七个项目均通过以下币安网页公开只读接口验证：
 
     POST /bapi/futures/v1/friendly/future/copy-trade/lead-portfolio/order-history
 
@@ -61,6 +65,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 - Sky株式会社：PUBLIC 项目，positionShow=false，但接口有效，读取到真实 TSLA、BTC、NVDA 操作。
 - 发烧好了呢：SIGNAL 项目，接口有效，读取到真实 SOXS、AMD、MUU、MU 操作。
 - 勤劳的小蜜蜂_：PUBLIC 项目，接口有效，读取到真实 ZECUSDT 操作。
+- Luke2019：SIGNAL 项目，接口有效，读取到真实 HYPE、ETH、AAVE 操作；使用 `BOTH` 单向持仓模式。
 
 只验证接口而不发消息：
 
@@ -74,7 +79,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 
 只保留 `.github/workflows/monitor.yml` 一个工作流，由现有 Cloudflare Worker Cron Trigger 每 5 分钟通过 `workflow_dispatch` 触发；工作流仍可手动运行。
 
-六位交易员共用现有 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 两个 Repository Secrets，无需新增密钥或机器人。状态保存在独立 monitor-state 分支。
+七位交易员共用现有 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 两个 Repository Secrets，无需新增密钥或机器人。状态保存在独立 monitor-state 分支。
 
 公开仓库使用标准 ubuntu-slim GitHub-hosted runner。Cloudflare 只负责触发同一个 GitHub Actions 工作流；监控程序仍通过独立去重状态补抓最新记录窗口内的交易。
 

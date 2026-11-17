@@ -21,7 +21,7 @@ def _format_order_time(milliseconds: int, timezone_name: str) -> str:
 
 def render_event(event: TradeEvent, settings: Settings) -> str:
     action = ACTION_LABELS[event.action]
-    direction = "多" if event.position_side == "LONG" else "空"
+    direction = "多" if event.action.endswith("LONG") else "空"
     quote_asset = event.quote_asset or "USDT"
     notional_value = event.executed_qty * event.avg_price
     return chr(10).join(

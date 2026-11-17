@@ -59,6 +59,25 @@ class OrderModelTests(unittest.TestCase):
             with self.subTest(side=side, position_side=position_side):
                 self.assertEqual(parse_orders([row])[0].action, expected)
 
+    def test_all_four_one_way_mode_operation_mappings(self) -> None:
+        cases = [
+            ("BUY", 0, "OPEN_LONG"),
+            ("SELL", 0, "OPEN_SHORT"),
+            ("SELL", 12.5, "CLOSE_LONG"),
+            ("BUY", -8.25, "CLOSE_SHORT"),
+        ]
+        for index, (side, total_pnl, expected) in enumerate(cases):
+            row = dict(
+                LIVE_OPEN_LONG,
+                side=side,
+                positionSide="BOTH",
+                totalPnl=total_pnl,
+                orderTime=1794867227286 + index,
+                orderUpdateTime=1794867238849 + index,
+            )
+            with self.subTest(side=side, total_pnl=total_pnl):
+                self.assertEqual(parse_orders([row])[0].action, expected)
+
     def test_fingerprint_ignores_later_pnl_correction(self) -> None:
         first = parse_orders([LIVE_OPEN_LONG])[0]
         changed = parse_orders([{**LIVE_OPEN_LONG, "totalPnl": 123.45}])[0]

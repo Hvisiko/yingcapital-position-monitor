@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir -p .runtime
           if git fetch origin monitor-state:refs/remotes/origin/monitor-state; then
-            for portfolio_id in 5075281354358777856 5296057151807357697 5247756265911980544 4532994172262753536 5271501457743196416 5307033607493882624; do
+            for portfolio_id in 5075281354358777856 5296057151807357697 5247756265911980544 4532994172262753536 5271501457743196416 5307033607493882624 5293752834070546944; do
               if git cat-file -e "origin/monitor-state:${portfolio_id}.json" 2>/dev/null; then
                 git show "origin/monitor-state:${portfolio_id}.json" > ".runtime/${portfolio_id}.json"
               elif [ "${portfolio_id}" = "5075281354358777856" ] && git cat-file -e origin/monitor-state:state.json 2>/dev/null; then
@@ -63,6 +63,8 @@ jobs:
           BINANCE_TRADER_5_NAME: "发烧好了呢"
           BINANCE_TRADER_6_PORTFOLIO_ID: "5307033607493882624"
           BINANCE_TRADER_6_NAME: "勤劳的小蜜蜂_"
+          BINANCE_TRADER_7_PORTFOLIO_ID: "5293752834070546944"
+          BINANCE_TRADER_7_NAME: "Luke2019"
           MONITOR_TIMEZONE: "America/New_York"
           MONITOR_STATE_DIR: ".runtime"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

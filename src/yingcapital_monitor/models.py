@@ -66,6 +66,12 @@ class OrderRecord:
 
     @property
     def action(self) -> str | None:
+        if self.position_side == "BOTH":
+            # 单向持仓的公开操作行不含 reduceOnly。该接口以 totalPnl=0
+            # 表示开仓操作，非零已实现盈亏表示平仓操作。
+            if self.total_pnl != ZERO:
+                return "CLOSE_SHORT" if self.side == "BUY" else "CLOSE_LONG"
+            return "OPEN_LONG" if self.side == "BUY" else "OPEN_SHORT"
         return ACTION_BY_SIDE.get((self.side, self.position_side))
 
     @property
@@ -182,7 +188,7 @@ def parse_orders(rows: list[dict[str, Any]]) -> list[OrderRecord]:
         if (
             not symbol
             or side not in {"BUY", "SELL"}
-            or position_side not in {"LONG", "SHORT"}
+            or position_side not in {"LONG", "SHORT", "BOTH"}
             or executed_qty == 0
             or order_time <= 0
         ):

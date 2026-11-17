@@ -11,7 +11,7 @@ from yingcapital_monitor.notify import _format_order_time, render_event
 
 
 class MultiTraderConfigurationTests(unittest.TestCase):
-    def test_six_default_traders_have_unique_state_files(self) -> None:
+    def test_seven_default_traders_have_unique_state_files(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             settings_list = Settings.all_from_env(require_notifications=False)
 
@@ -19,8 +19,8 @@ class MultiTraderConfigurationTests(unittest.TestCase):
             [(item.portfolio_id, item.trader_name) for item in settings_list],
             list(DEFAULT_TRADERS),
         )
-        self.assertEqual(len(settings_list), 6)
-        self.assertEqual(len({item.state_path for item in settings_list}), 6)
+        self.assertEqual(len(settings_list), 7)
+        self.assertEqual(len({item.state_path for item in settings_list}), 7)
 
     def test_telegram_message_contains_required_trade_fields(self) -> None:
         settings = Settings(
@@ -93,6 +93,35 @@ class MultiTraderConfigurationTests(unittest.TestCase):
         summer = _format_order_time(1784131200000, "America/New_York")
         self.assertEqual(winter, "2026-11-16T09:16:54-05:00")
         self.assertEqual(summer, "2026-07-15T12:00:00-04:00")
+
+    def test_one_way_mode_message_uses_action_direction(self) -> None:
+        settings = Settings(
+            portfolio_id="5293752834070546944",
+            trader_name="Luke2019",
+            timezone="America/New_York",
+            state_path=Path(".runtime/test.json"),
+            telegram_bot_token="token",
+            telegram_chat_id="chat",
+        )
+        event = TradeEvent(
+            order_fingerprint="luke-close-short",
+            action="CLOSE_SHORT",
+            symbol="SAMSUNGUSDT",
+            base_asset="SAMSUNG",
+            quote_asset="USDT",
+            side="BUY",
+            position_side="BOTH",
+            order_type="MARKET",
+            executed_qty=Decimal("60"),
+            avg_price=Decimal("155.5858166"),
+            total_pnl=Decimal("246.33863739"),
+            order_time=1794543699679,
+            order_update_time=1794543699679,
+        )
+
+        message = render_event(event, settings)
+        self.assertIn("交易员：Luke2019", message)
+        self.assertIn("操作方向：平空（空）", message)
 
 
 if __name__ == "__main__":
