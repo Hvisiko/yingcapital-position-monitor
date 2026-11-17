@@ -14,6 +14,8 @@ ACTION_LABELS = {
     "OPEN_SHORT": "开空",
     "CLOSE_LONG": "平多",
     "CLOSE_SHORT": "平空",
+    "BUY_DIRECTION": "做多",
+    "SELL_DIRECTION": "做空",
     "DIRECTION_UNCONFIRMED": "方向待确认",
 }
 
@@ -70,8 +72,9 @@ class OrderRecord:
         if self.position_side == "BOTH":
             # 单向持仓的公开行只有 BUY/SELL，没有 reduceOnly、OPEN/CLOSE
             # 或成交前后仓位。BUY 既可能开多也可能平空，SELL 既可能开空
-            # 也可能平多；totalPnl 可能在开仓行中非零，不能作为开平依据。
-            return "DIRECTION_UNCONFIRMED"
+            # 也可能平多；网页因此只显示“做多/做空”交易方向，不声称开平。
+            # totalPnl 可能在开仓行中非零，不能作为开平依据。
+            return "BUY_DIRECTION" if self.side == "BUY" else "SELL_DIRECTION"
         return ACTION_BY_SIDE.get((self.side, self.position_side))
 
     @property
@@ -161,8 +164,10 @@ class TradeEvent:
         position_side = str(raw["position_side"])
         action = str(raw["action"])
         if position_side == "BOTH":
-            # 防止升级前已经进入 pending 的猜测动作在恢复状态后继续误报。
-            action = "DIRECTION_UNCONFIRMED"
+            # 防止升级前已进入 pending 的猜测动作恢复后继续误报；只保留
+            # 与网页一致的做多/做空方向，不声称是开仓还是平仓。
+            side = str(raw["side"])
+            action = "BUY_DIRECTION" if side == "BUY" else "SELL_DIRECTION"
         return cls(
             order_fingerprint=str(raw["order_fingerprint"]),
             action=action,

@@ -109,7 +109,7 @@ class MultiTraderConfigurationTests(unittest.TestCase):
             "2026-11-16T18:51:28-05:00",
         )
 
-    def test_one_way_mode_message_marks_direction_unconfirmed(self) -> None:
+    def test_one_way_mode_message_matches_web_direction_without_claiming_open(self) -> None:
         settings = Settings(
             portfolio_id="5293752834070546944",
             trader_name="Luke2019",
@@ -120,27 +120,28 @@ class MultiTraderConfigurationTests(unittest.TestCase):
         )
         event = TradeEvent(
             order_fingerprint="luke-ethusdc-buy",
-            action="DIRECTION_UNCONFIRMED",
-            symbol="ETHUSDC",
-            base_asset="ETH",
+            action="SELL_DIRECTION",
+            symbol="AAVEUSDC",
+            base_asset="AAVE",
             quote_asset="USDC",
-            side="BUY",
+            side="SELL",
             position_side="BOTH",
             order_type="LIMIT",
-            executed_qty=Decimal("20"),
-            avg_price=Decimal("1828"),
-            total_pnl=Decimal("460"),
-            order_time=1794899394660,
-            order_update_time=1794899576361,
+            executed_qty=Decimal("10"),
+            avg_price=Decimal("114"),
+            total_pnl=Decimal("0"),
+            order_time=1794916776713,
+            order_update_time=1794919527650,
         )
 
         message = render_event(event, settings)
         self.assertIn("交易员：Luke2019", message)
         self.assertIn(
-            "操作方向：方向待确认（买入；公开记录无法确认开多或平空）",
+            "操作方向：做空（卖出；单向模式，开/平仓未公开）",
             message,
         )
-        self.assertNotIn("操作方向：平空", message)
+        self.assertNotIn("操作方向：开空", message)
+        self.assertNotIn("操作方向：平多", message)
 
 
 if __name__ == "__main__":

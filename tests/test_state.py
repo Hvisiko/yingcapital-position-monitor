@@ -101,7 +101,7 @@ class StateTests(unittest.TestCase):
 
         self.assertEqual(restored.to_dict(), original.to_dict())
 
-    def test_legacy_pending_both_action_is_made_unconfirmed(self) -> None:
+    def test_legacy_pending_both_action_is_made_web_direction_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             legacy = event().to_dict()
@@ -132,7 +132,7 @@ class StateTests(unittest.TestCase):
 
         self.assertEqual(
             restored.pending[0].event.action,
-            "DIRECTION_UNCONFIRMED",
+            "BUY_DIRECTION",
         )
         self.assertEqual(restored.pending[0].event.order_fingerprint, "abc123")
 

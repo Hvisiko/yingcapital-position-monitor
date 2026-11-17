@@ -271,7 +271,7 @@ class MonitorTests(unittest.TestCase):
                     for portfolio_id, event in sent
                     if portfolio_id == TRADERS[6][0]
                 )
-                self.assertEqual(luke_event.action, "DIRECTION_UNCONFIRMED")
+                self.assertEqual(luke_event.action, "BUY_DIRECTION")
 
                 # 相同数据再次运行，不能重复通知。
                 self.assertEqual(run_monitors(settings_list), 0)
