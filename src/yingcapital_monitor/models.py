@@ -14,6 +14,7 @@ ACTION_LABELS = {
     "OPEN_SHORT": "开空",
     "CLOSE_LONG": "平多",
     "CLOSE_SHORT": "平空",
+    "DIRECTION_UNCONFIRMED": "方向待确认",
 }
 
 ACTION_BY_SIDE = {
@@ -67,11 +68,10 @@ class OrderRecord:
     @property
     def action(self) -> str | None:
         if self.position_side == "BOTH":
-            # 单向持仓的公开操作行不含 reduceOnly。该接口以 totalPnl=0
-            # 表示开仓操作，非零已实现盈亏表示平仓操作。
-            if self.total_pnl != ZERO:
-                return "CLOSE_SHORT" if self.side == "BUY" else "CLOSE_LONG"
-            return "OPEN_LONG" if self.side == "BUY" else "OPEN_SHORT"
+            # 单向持仓的公开行只有 BUY/SELL，没有 reduceOnly、OPEN/CLOSE
+            # 或成交前后仓位。BUY 既可能开多也可能平空，SELL 既可能开空
+            # 也可能平多；totalPnl 可能在开仓行中非零，不能作为开平依据。
+            return "DIRECTION_UNCONFIRMED"
         return ACTION_BY_SIDE.get((self.side, self.position_side))
 
     @property
@@ -158,14 +158,19 @@ class TradeEvent:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "TradeEvent":
+        position_side = str(raw["position_side"])
+        action = str(raw["action"])
+        if position_side == "BOTH":
+            # 防止升级前已经进入 pending 的猜测动作在恢复状态后继续误报。
+            action = "DIRECTION_UNCONFIRMED"
         return cls(
             order_fingerprint=str(raw["order_fingerprint"]),
-            action=str(raw["action"]),
+            action=action,
             symbol=str(raw["symbol"]),
             base_asset=str(raw.get("base_asset", "")),
             quote_asset=str(raw.get("quote_asset", "USDT")),
             side=str(raw["side"]),
-            position_side=str(raw["position_side"]),
+            position_side=position_side,
             order_type=str(raw.get("order_type", "UNKNOWN")),
             executed_qty=decimal_value(raw["executed_qty"]),
             avg_price=decimal_value(raw.get("avg_price")),

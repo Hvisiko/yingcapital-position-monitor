@@ -266,6 +266,12 @@ class MonitorTests(unittest.TestCase):
                     {portfolio_id for portfolio_id, _ in TRADERS},
                 )
                 self.assertEqual(len(sent), 8)
+                luke_event = next(
+                    event
+                    for portfolio_id, event in sent
+                    if portfolio_id == TRADERS[6][0]
+                )
+                self.assertEqual(luke_event.action, "DIRECTION_UNCONFIRMED")
 
                 # 相同数据再次运行，不能重复通知。
                 self.assertEqual(run_monitors(settings_list), 0)

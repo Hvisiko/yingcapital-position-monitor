@@ -33,6 +33,20 @@ SKY_CL_OPEN_LONG = {
     "orderTime": 1794692560039,
 }
 
+LUKE_ETHUSDC_BUY = {
+    "symbol": "ETHUSDC",
+    "baseAsset": "ETH",
+    "quoteAsset": "USDC",
+    "side": "BUY",
+    "type": "LIMIT",
+    "positionSide": "BOTH",
+    "executedQty": 20.0,
+    "avgPrice": 1828.0,
+    "totalPnl": 460.0,
+    "orderTime": 1794899394660,
+    "orderUpdateTime": 1794899576361,
+}
+
 
 class OrderModelTests(unittest.TestCase):
     def test_live_1821_record_is_open_long(self) -> None:
@@ -59,14 +73,14 @@ class OrderModelTests(unittest.TestCase):
             with self.subTest(side=side, position_side=position_side):
                 self.assertEqual(parse_orders([row])[0].action, expected)
 
-    def test_all_four_one_way_mode_operation_mappings(self) -> None:
+    def test_one_way_mode_never_guesses_open_or_close_from_pnl(self) -> None:
         cases = [
-            ("BUY", 0, "OPEN_LONG"),
-            ("SELL", 0, "OPEN_SHORT"),
-            ("SELL", 12.5, "CLOSE_LONG"),
-            ("BUY", -8.25, "CLOSE_SHORT"),
+            ("BUY", 0),
+            ("SELL", 0),
+            ("SELL", 12.5),
+            ("BUY", -8.25),
         ]
-        for index, (side, total_pnl, expected) in enumerate(cases):
+        for index, (side, total_pnl) in enumerate(cases):
             row = dict(
                 LIVE_OPEN_LONG,
                 side=side,
@@ -76,7 +90,20 @@ class OrderModelTests(unittest.TestCase):
                 orderUpdateTime=1794867238849 + index,
             )
             with self.subTest(side=side, total_pnl=total_pnl):
-                self.assertEqual(parse_orders([row])[0].action, expected)
+                self.assertEqual(
+                    parse_orders([row])[0].action,
+                    "DIRECTION_UNCONFIRMED",
+                )
+
+    def test_real_luke_ethusdc_buy_is_not_guessed_as_close_short(self) -> None:
+        order = parse_orders([LUKE_ETHUSDC_BUY])[0]
+        self.assertEqual(order.action, "DIRECTION_UNCONFIRMED")
+        self.assertEqual(order.operation_time, 1794899576361)
+        # 动作修复不能改变历史指纹，否则部署后会重复推送同一笔交易。
+        self.assertEqual(
+            order.fingerprint,
+            "7a4560e36122c4df4780a02772194cba68036a79145be02f310e4ae8c935a5e7",
+        )
 
     def test_fingerprint_ignores_later_pnl_correction(self) -> None:
         first = parse_orders([LIVE_OPEN_LONG])[0]

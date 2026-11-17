@@ -101,6 +101,41 @@ class StateTests(unittest.TestCase):
 
         self.assertEqual(restored.to_dict(), original.to_dict())
 
+    def test_legacy_pending_both_action_is_made_unconfirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            legacy = event().to_dict()
+            legacy.update(
+                {
+                    "action": "CLOSE_SHORT",
+                    "position_side": "BOTH",
+                }
+            )
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 3,
+                        "portfolio_id": PORTFOLIO_ID,
+                        "initialized": True,
+                        "seen_order_fingerprints": ["abc123"],
+                        "pending": [
+                            {
+                                "event": legacy,
+                                "delivered": {"telegram": False},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            restored = load_state(path, PORTFOLIO_ID)
+
+        self.assertEqual(
+            restored.pending[0].event.action,
+            "DIRECTION_UNCONFIRMED",
+        )
+        self.assertEqual(restored.pending[0].event.order_fingerprint, "abc123")
+
 
 if __name__ == "__main__":
     unittest.main()

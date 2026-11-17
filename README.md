@@ -1,6 +1,6 @@
 # 币安八交易员公开操作记录监控
 
-本项目每 5 分钟在同一个 GitHub Actions 工作流中读取已启用交易员的网页“最新操作记录”。交易员名单只保存在 [`traders.json`](traders.json)：
+本项目每 2 分钟在同一个 GitHub Actions 工作流中读取已启用交易员的网页“最新操作记录”。交易员名单只保存在 [`traders.json`](traders.json)：
 
 | 交易员 | 项目 ID |
 |---|---|
@@ -42,7 +42,7 @@
 - SELL + LONG：平多
 - BUY + SHORT：平空
 
-`positionSide=BOTH` 表示单向持仓模式。公开操作记录没有 `reduceOnly` 字段，程序按同一行的 `side` 和 `totalPnl` 区分：零已实现盈亏的 BUY/SELL 为开多/开空，非零已实现盈亏的 SELL/BUY 为平多/平空。
+`positionSide=BOTH` 表示单向持仓模式。公开操作记录没有 `reduceOnly`、`OPEN/CLOSE` 或成交前后仓位字段；`totalPnl` 也不能可靠区分开仓和平仓。因此 BUY 只显示“方向待确认（买入；可能开多或平空）”，SELL 只显示“方向待确认（卖出；可能开空或平多）”，绝不猜测四方向。
 
 程序没有下单、撤单、账户或资金接口，不需要币安 API Key，不调用 OpenAI API、ChatGPT、Codex 或任何付费模型。
 
@@ -69,7 +69,7 @@
 6. data=null、HTTP 错误或格式异常时保留该交易员原状态，不产生虚假提醒。
 7. 暂停或从名单删除只停止检查，不删除 `monitor-state` 分支中的历史状态。
 
-Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空、成交价格、成交数量、名义价值、操作时间、订单类型和项目 ID。
+Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空（单向持仓数据不足时为“方向待确认”）、成交价格、成交数量、名义价值、操作时间、订单类型和项目 ID。
 
 “操作时间”使用币安同一条操作记录的 `orderUpdateTime`（成交/最新操作时间），与网页显示一致；仅当该字段缺失或无效时才回退到 `orderTime`（原始下单时间）。时间戳按 UTC 解析后通过 IANA `America/New_York` 时区转换，自动处理夏令时。
 
@@ -100,7 +100,7 @@ Telegram 通知包含交易员昵称、交易对、开多/开空/平多/平空�
 
 ## GitHub Actions
 
-只保留 `.github/workflows/monitor.yml` 一个工作流，由现有 Cloudflare Worker Cron Trigger 每 5 分钟通过 `workflow_dispatch` 触发；工作流仍可手动运行。
+只保留 `.github/workflows/monitor.yml` 一个工作流，由现有 Cloudflare Worker Cron Trigger 每 2 分钟通过 `workflow_dispatch` 触发；工作流仍可手动运行。
 
 八位交易员共用现有 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 两个 Repository Secrets，无需新增密钥或机器人。状态保存在独立 monitor-state 分支。
 

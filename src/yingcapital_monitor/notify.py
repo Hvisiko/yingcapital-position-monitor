@@ -21,7 +21,15 @@ def _format_order_time(milliseconds: int, timezone_name: str) -> str:
 
 def render_event(event: TradeEvent, settings: Settings) -> str:
     action = ACTION_LABELS[event.action]
-    direction = "多" if event.action.endswith("LONG") else "空"
+    if event.action == "DIRECTION_UNCONFIRMED":
+        side_label = "买入" if event.side == "BUY" else "卖出"
+        possibilities = "开多或平空" if event.side == "BUY" else "开空或平多"
+        operation_text = (
+            f"{action}（{side_label}；公开记录无法确认{possibilities}）"
+        )
+    else:
+        direction = "多" if event.action.endswith("LONG") else "空"
+        operation_text = f"{action}（{direction}）"
     quote_asset = event.quote_asset or "USDT"
     notional_value = event.executed_qty * event.avg_price
     return chr(10).join(
@@ -29,7 +37,7 @@ def render_event(event: TradeEvent, settings: Settings) -> str:
             f"【{settings.trader_name}】{action}提醒",
             f"交易员：{settings.trader_name}",
             f"交易对：{event.symbol}",
-            f"操作方向：{action}（{direction}）",
+            f"操作方向：{operation_text}",
             f"成交价格：{decimal_text(event.avg_price)} {quote_asset}",
             f"成交数量：{decimal_text(event.executed_qty)}",
             f"成交价值：{decimal_text(notional_value)} {quote_asset}",
